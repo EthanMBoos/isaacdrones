@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Tooling
+.ruff_cache/
+.pytest_cache/
+.coverage
+
+# Isaac Sim / Omniverse runtime output
+_isaac_sim/
+kit/logs/
+*.log
+outputs/
+logs/
+recordings/
+
+# Downloaded assets and run outputs
+/data/
+/runs/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Written by Isaac Sim's streaming into the working folder
+*.etli

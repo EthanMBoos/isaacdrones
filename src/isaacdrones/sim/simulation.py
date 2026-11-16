@@ -1,0 +1,200 @@
+"""Lifecycle wrapper around Isaac Sim. Owns the app, the stage and the loop.
+
+Isaac Sim modules exist only while `SimulationApp` is running, so methods
+import them after `__init__` has started the app.
+
+Isaac Sim returns Warp arrays. Methods here convert to NumPy, so the rest of
+isaacdrones never sees Warp. Quaternions are wxyz.
+
+Verified headless on PACE ICE on an H100 and a Blackwell (docs/PACE.md).
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+KIT = Path(__file__).with_name("isaacdrones.kit")
+
+
+class Simulation:
+    """One Isaac Sim application with one stage.
+
+    `step()` runs one whole Kit frame: physics, OmniGraph, sensors, rendering.
+    The frame and physics timesteps are both `dt`, so one frame is one physics
+    step. Nothing else in isaacdrones steps the simulator.
+    """
+
+    def __init__(
+        self, *, headless: bool = False, dt: float = 1.0 / 60.0, stream_ip: str | None = None
+    ) -> None:
+        """`stream_ip` streams the Isaac Sim GUI to the WebRTC Streaming
+        Client. It is the address the client connects to.
+        """
+        os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
+
+        from isaacsim import SimulationApp
+
+        # limit_cpu_threads keeps Isaac Sim's default of 16.
+        if stream_ip is None:
+            # Our app file loads only the extensions we use: under 10 s to
+            # start on ICE, against 150 s for the stock app. Drop `experience`
+            # to run the stock app.
+            self._app = SimulationApp({"headless": headless}, experience=str(KIT))
+        else:
+            # Streaming needs the menus and panels, so it uses the stock app.
+            # Follows Isaac Sim's standalone example livestream.py.
+            stream = "--/exts/omni.kit.livestream.app/primaryStream/"
+            self._app = SimulationApp(
+                {
+                    "headless": True,
+                    "hide_ui": False,
+                    "window_width": 1920,
+                    "window_height": 1080,
+                    "display_options": 3286,
+                    "extra_args": [
+                        f"{stream}publicIp={stream_ip}",
+                        f"{stream}signalPort=49100",
+                        f"{stream}streamPort=47998",
+                    ],
+                }
+            )
+            from isaacsim.core.experimental.utils.app import enable_extension
+
+            self._app.set_setting("/app/window/drawMouse", True)
+            enable_extension("omni.kit.livestream.app")
+        self.dt = dt
+
+        import isaacsim.core.experimental.utils.stage as stage_utils
+        from isaacsim.core.rendering_manager import RenderingManager
+        from isaacsim.core.simulation_manager import SimulationManager
+
+        stage_utils.create_new_stage()
+        stage_utils.set_stage_units(meters_per_unit=1.0)
+        stage_utils.set_stage_up_axis("Z")
+
+        # Physics dt and frame dt are separate settings; equal values give
+        # one physics step per frame.
+        SimulationManager.setup_simulation(dt=dt)
+        RenderingManager.set_dt(dt)
+
+    def add_ground_and_light(self) -> None:
+        from isaacsim.core.experimental.objects import DistantLight, DomeLight, GroundPlane
+
+        GroundPlane("/World/GroundPlane", positions=[0, 0, 0])
+        # The distant light shines straight down and lights only tops. The
+        # dome light reaches the sides.
+        DistantLight("/World/DistantLight").set_intensities(300)
+        DomeLight("/World/DomeLight").set_intensities(500)
+
+    def add_cube(self, *, falling: bool = False) -> None:
+        """Add an orange cube: a 1 m cube resting at the origin, or with
+        `falling` a 0.6 m rigid body that starts 2 m up, tilted and spinning.
+        """
+        from isaacsim.core.experimental.objects import Cube
+
+        if not falling:
+            Cube("/World/Cube", sizes=1.0, positions=[0.0, 0.0, 0.5], colors="orange")
+            return
+
+        from isaacsim.core.experimental.prims import GeomPrim, RigidPrim
+
+        Cube(
+            "/World/Cube",
+            sizes=0.6,
+            positions=[-1.2, 0.0, 2.0],
+            orientations=[0.9239, 0.2706, 0.2706, 0.0],  # quat_wxyz, tilted 45 degrees
+            colors="orange",
+        )
+        GeomPrim("/World/Cube", apply_collision_apis=True)
+        self._cube = RigidPrim("/World/Cube", masses=[1.0])
+        self._cube.set_velocities(
+            linear_velocities=[1.2, 0.0, 0.0], angular_velocities=[2.0, 3.0, 1.0]
+        )
+
+    def cube_pose(self):
+        """World pose of the falling cube from physics: `(position_m,
+        quat_wxyz)`, NumPy arrays of shape (3,) and (4,).
+        """
+        positions, orientations = self._cube.get_world_poses()
+        return positions.numpy()[0], orientations.numpy()[0]
+
+    def add_camera(
+        self,
+        *,
+        position_m: tuple[float, float, float] = (0.0, -8.0, 1.0),
+        quat_wxyz: tuple[float, float, float, float] = (0.7071068, 0.7071068, 0.0, 0.0),
+        resolution_hw: tuple[int, int] = (480, 640),
+    ) -> None:
+        """Add one RTX camera. The default sits on -Y and looks along +Y with
+        world Z up in the image. A USD camera looks down its own -Z with +Y
+        up, so that orientation is a quarter turn about X.
+        """
+        from isaacsim.sensors.experimental.rtx import CameraSensor, RtxCamera
+
+        camera = RtxCamera(
+            "/World/Camera", translations=[list(position_m)], orientations=[list(quat_wxyz)]
+        )
+        self._camera = CameraSensor(camera, resolution=resolution_hw, annotators=["rgb"])
+
+    def camera_rgb(self):
+        """Latest camera image: NumPy uint8 of shape (height, width, 3). None
+        until the renderer has an image.
+        """
+        data, _ = self._camera.get_data("rgb")
+        return None if data is None else data.numpy()
+
+    def play(self) -> None:
+        import isaacsim.core.experimental.utils.app as app_utils
+
+        app_utils.play()
+
+    def stop(self) -> None:
+        import isaacsim.core.experimental.utils.app as app_utils
+
+        app_utils.stop()
+
+    def reset(self) -> None:
+        """Stop and play again, which returns the stage to its initial state.
+
+        Physics and the simulation clock act on the stop only during a Kit
+        frame, so one frame runs in between. Without it, time carries on.
+        """
+        self.stop()
+        self._app.update()
+        self.play()
+
+    def step(self) -> None:
+        """Run one Kit frame."""
+        self._app.update()
+
+    def is_running(self) -> bool:
+        # is_exiting covers File > Exit in a streamed GUI.
+        return self._app.is_running() and not self._app.is_exiting()
+
+    @property
+    def time(self) -> float:
+        """Simulation time in seconds. Logic reads this, not wall-clock time.
+
+        Isaac Sim takes two warm-up physics steps in `play()`, so time is
+        `2 * dt` when it returns.
+        """
+        from isaacsim.core.simulation_manager import SimulationManager
+
+        return SimulationManager.get_simulation_time()
+
+    @property
+    def num_physics_steps(self) -> int:
+        from isaacsim.core.simulation_manager import SimulationManager
+
+        return SimulationManager.get_num_physics_steps()
+
+    @property
+    def physics_engine(self) -> str:
+        from isaacsim.core.simulation_manager import SimulationManager
+
+        return SimulationManager.get_active_physics_engine()
+
+    def close(self, exit_code: int = 0) -> None:
+        """Shut down Isaac Sim. This exits the process, so call it last."""
+        self._app.close(exit_code=exit_code)

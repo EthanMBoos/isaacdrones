@@ -1,0 +1,96 @@
+# The Isaac Sim app that isaacdrones starts.
+#
+# Isaac Sim's stock Python app (isaacsim.exp.base.python.kit) loads a few
+# hundred extensions, mostly GUI panels, importers and Replicator tooling.
+# This file lists only what isaacdrones.sim uses. Each extension loads its own
+# dependencies, PhysX and the RTX renderer included. On PACE ICE this boots
+# in under 10 s, against about 150 s for the stock app.
+#
+# To use more of Isaac Sim (ROS 2 bridge, sensors), add the extension under
+# [dependencies].
+#
+# The settings come from Isaac Sim 6.2's isaacsim.exp.base.kit and
+# isaacsim.exp.base.python.kit. Recheck them when bumping Isaac Sim.
+
+[package]
+title = "isaacdrones"
+description = "Slim Isaac Sim app for isaacdrones"
+version = "0.1.0"
+keywords = ["experience", "app", "usd", "isaacsim"]
+
+[dependencies]
+"isaacsim.simulation_app" = {}
+"isaacsim.core.experimental.utils" = {}
+"isaacsim.core.experimental.objects" = {}
+"isaacsim.core.simulation_manager" = {}
+"isaacsim.core.rendering_manager" = {}
+"omni.kit.loop-isaac" = {}
+# RTX camera, lidar and radar
+"isaacsim.sensors.experimental.rtx" = {}
+"omni.rtx.spg" = {}
+
+[settings]
+exts."omni.kit.renderer.core".present.enabled = false
+exts."omni.usd".locking.onClose = false
+foundation.verifyOsVersion.enabled = false
+physics.autoPopupSimulationOutputWindow = false
+renderer.asyncInit = true
+renderer.gpuEnumeration.glInterop.enabled = false
+isaac.startup.ros_bridge_extension = ""
+# For the RTX sensors
+omni.replicator.asyncRendering = false
+rtx-transient.dlssg.enabled = false
+rtx.hydra.mdlMaterialWarmup = true
+rtx.hydra.supportMultiTickRate = true
+rtx.rendering.perSensorTickTlas = true
+rtx.spg.enabled = true
+
+[settings.app]
+name = "isaacdrones"
+version = "0.1.0"
+content.emptyStageOnStart = true
+fastShutdown = true
+file.ignoreUnsavedStage = true
+hangDetector.enabled = true
+hangDetector.timeout = 120
+settings.persistent = false
+settings.fabricDefaultStageFrameHistoryCount = 3
+useFabricSceneDelegate = true
+enableDeveloperWarnings = false
+# Each frame advances a fixed timestep, set by RenderingManager.set_dt.
+runLoops.main.rateLimitEnabled = false
+runLoops.main.manualModeEnabled = true
+player.useFixedTimeStepping = false
+events.qualifiedNames = true
+vulkan = true
+asyncRendering = false
+asyncRenderingLowLatency = false
+
+# ${exe-path} is the kit folder inside the installed isaacsim package.
+[settings.app.exts.folders]
+'++' = [
+    "${exe-path}/../exts",
+    "${exe-path}/../extscache",
+    "${exe-path}/../extsUser",
+    "${exe-path}/../extsDeprecated",
+]
+
+[settings.app.renderer]
+resolution.height = 720
+resolution.width = 1280
+skipWhileMinimized = false
+sleepMsOnFocus = 0
+sleepMsOutOfFocus = 0
+
+[settings.persistent]
+app.primCreation.DefaultXformOpOrder = "xformOp:translate, xformOp:orient, xformOp:scale"
+app.primCreation.DefaultXformOpType = "Scale, Orient, Translate"
+app.primCreation.DefaultXformOpPrecision = "Double"
+app.primCreation.DefaultRotationOrder = "ZYX"
+app.primCreation.PrimCreationWithDefaultXformOps = true
+app.stage.upAxis = "Z"
+physics.resetOnStop = true
+# Camera annotators return data only while Replicator is capturing.
+omni.replicator.captureOnPlay = true
+renderer.startupMessageDisplayed = true
+simulation.defaultMetersPerUnit = 1.0

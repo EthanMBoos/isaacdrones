@@ -1,0 +1,73 @@
+[project]
+name = "isaacdrones"
+version = "0.1.0"
+description = "A slim NVIDIA Isaac Sim starting point for aerial drones"
+readme = "README.md"
+authors = [
+    { name = "Ethan Boos", email = "moosboos1@gmail.com" }
+]
+# Isaac Sim 6.x wheels are built for CPython 3.12 only.
+requires-python = "==3.12.*"
+# Core deps: must be importable WITHOUT Isaac Sim (so tests/tooling run anywhere, incl. macOS).
+dependencies = []
+
+[project.optional-dependencies]
+# The simulator itself. Wheels exist only for Linux (glibc 2.35+) and Windows x86_64,
+# so the markers let `uv sync` still work on macOS for non-sim development.
+sim = [
+    "isaacsim[all,extscache]==6.2.0.0 ; sys_platform == 'linux' or sys_platform == 'win32'",
+    "torch==2.11.0 ; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+
+[project.scripts]
+isaacdrones = "isaacdrones.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+    "pre-commit>=4",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+# --- uv / package indexes -------------------------------------------------
+[tool.uv]
+# isaacsim pulls dozens of isaacsim-* / omniverse-kit packages from pypi.nvidia.com,
+# while some names also exist on PyPI. Pick the best version across indexes.
+index-strategy = "unsafe-best-match"
+# isaacsim-core pins pre-release transitive deps (e.g. tinyobjloader==2.0.0rc13).
+# Pin them here so the resolver accepts those pre-releases and no others.
+# Bump alongside the isaacsim version.
+prerelease = "if-necessary"
+constraint-dependencies = [
+    "tinyobjloader==2.0.0rc13",
+]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+# --- tooling ----------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "sim: requires a working Isaac Sim install + RTX GPU (deselect with -m 'not sim')",
+]
