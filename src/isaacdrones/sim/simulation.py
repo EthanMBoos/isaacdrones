@@ -11,12 +11,27 @@ Verified headless on PACE ICE on an H100 and a Blackwell (docs/PACE.md).
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 
 KIT = Path(__file__).with_name("isaacdrones.kit")
 # Where the drone's camera sits in the drone's frame.
 DRONE_CAMERA_M = (0.2, 0.0, 0.0)
+# Google Photorealistic 3D Tiles, as a Cesium ion asset.
+GOOGLE_TILES_ASSET = 2275207
+
+
+def _quat_multiply(a, b):
+    """The rotation `b` followed by `a`, both wxyz."""
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return (
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    )
 
 
 class Simulation:
@@ -28,17 +43,43 @@ class Simulation:
     """
 
     def __init__(
-        self, *, headless: bool = False, dt: float = 1.0 / 60.0, stream_ip: str | None = None
+        self,
+        *,
+        headless: bool = False,
+        dt: float = 1.0 / 60.0,
+        stream_ip: str | None = None,
+        cesium_dir: str | None = None,
     ) -> None:
         """`stream_ip` streams the Isaac Sim GUI to the WebRTC Streaming
         Client. It is the address the client connects to.
+
+        `cesium_dir` is the folder that holds the Cesium for Omniverse
+        extensions, and starts the app with them (docs/CESIUM.md).
         """
         os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
 
         from isaacsim import SimulationApp
 
         # limit_cpu_threads keeps Isaac Sim's default of 16.
-        if stream_ip is None:
+        self._cesium = None
+        if cesium_dir is not None:
+            # Cesium registers USD schemas, so it must be enabled as the app
+            # starts, and it imports GUI extensions that our app file leaves
+            # out, so it runs in the stock app.
+            self._app = SimulationApp(
+                {
+                    "headless": headless,
+                    "extra_args": [
+                        "--ext-folder",
+                        cesium_dir,
+                        "--enable",
+                        "cesium.usd.plugins",
+                        "--enable",
+                        "cesium.omniverse",
+                    ],
+                }
+            )
+        elif stream_ip is None:
             # Our app file loads only the extensions we use: under 10 s to
             # start on ICE, against 150 s for the stock app. Drop `experience`
             # to run the stock app.
@@ -112,6 +153,55 @@ class Simulation:
         if root is None:
             raise RuntimeError("Isaac Sim's hosted assets could not be reached.")
         stage_utils.add_reference_to_stage(usd_path=root + asset, path=path)
+
+    def add_cesium_tiles(
+        self, *, latitude_deg: float, longitude_deg: float, height_m: float, token: str
+    ) -> None:
+        """Add Google's photorealistic 3D tiles, streamed by Cesium, with the
+        world's origin at this place: x east, y north, z up. `height_m` is
+        above the WGS84 ellipsoid. Needs `cesium_dir` and the internet.
+        """
+        import isaacsim.core.experimental.utils.stage as stage_utils
+        from cesium.omniverse import extension
+        from cesium.omniverse.usdUtils import get_path_to_current_ion_server
+        from cesium.usd.plugins.CesiumUsdSchemas import Data, Georeference, Tileset, Tokens
+        from isaacsim.core.experimental.objects import DomeLight
+
+        stage = stage_utils.get_current_stage()
+        Data.Define(stage, "/Cesium")
+        origin = Georeference.Define(stage, "/CesiumGeoreference")
+        origin.GetGeoreferenceOriginLatitudeAttr().Set(latitude_deg)
+        origin.GetGeoreferenceOriginLongitudeAttr().Set(longitude_deg)
+        origin.GetGeoreferenceOriginHeightAttr().Set(height_m)
+        tiles = Tileset.Define(stage, "/World/Tiles")
+        tiles.GetSourceTypeAttr().Set(Tokens.ion)
+        tiles.GetIonAssetIdAttr().Set(GOOGLE_TILES_ASSET)
+        tiles.GetIonAccessTokenAttr().Set(token)
+        tiles.GetGeoreferenceBindingRel().AddTarget("/CesiumGeoreference")
+        server = get_path_to_current_ion_server()
+        if server:
+            tiles.GetIonServerBindingRel().AddTarget(server)
+        # The tiles are photographs, with the sunlight of their day in them,
+        # so the scene adds even light and no sun.
+        DomeLight("/World/DomeLight").set_intensities(700)
+        self._cesium = extension
+
+    def _load_cesium_tiles(self) -> None:
+        """Have Cesium load the tiles the camera sees, and wait for them.
+        Cesium's own update does not wait, so a moving camera would record
+        tiles arriving late, differently on every run.
+        """
+        from cesium.omniverse.bindings import Viewport
+        from omni.kit.viewport.window import get_viewport_window_instances
+
+        views = []
+        for window in get_viewport_window_instances():
+            api = window.viewport_api
+            view = Viewport()
+            view.viewMatrix, view.projMatrix = api.view, api.projection
+            view.width, view.height = float(api.resolution[0]), float(api.resolution[1])
+            views.append(view)
+        self._cesium._cesium_omniverse_interface.on_update_frame(views, True)
 
     def add_cube(self, *, falling: bool = False) -> None:
         """Add an orange cube: a 1 m cube resting at the origin, or with
@@ -201,14 +291,16 @@ class Simulation:
         quat_wxyz: tuple[float, float, float, float] = (0.7071068, 0.7071068, 0.0, 0.0),
         resolution_hw: tuple[int, int] = (480, 640),
         on_drone: bool = False,
+        pitch_down_deg: float = 0.0,
+        far_m: float = 1000.0,
     ) -> None:
         """Add one RTX camera. The default sits on -Y and looks along +Y with
         world Z up in the image. A USD camera looks down its own -Z with +Y
         up, so that orientation is a quarter turn about X.
 
         With `on_drone` the camera is fixed to the drone's nose and looks
-        along the drone's x axis, and the position and orientation are not
-        used.
+        along the drone's x axis, tipped down by `pitch_down_deg`, and the
+        position and orientation are not used. `far_m` is how far it sees.
         """
         import isaacsim.core.experimental.utils.stage as stage_utils
         from isaacsim.sensors.experimental.rtx import CameraSensor, RtxCamera
@@ -217,8 +309,14 @@ class Simulation:
         if on_drone:
             path = "/World/Drone/Camera"
             # In the drone's frame: 0.2 m ahead of center, clear of the box,
-            # looking along x with z up in the image.
-            position_m, quat_wxyz = DRONE_CAMERA_M, (0.5, 0.5, -0.5, -0.5)
+            # looking along x with z up in the image, then tipped down about
+            # the drone's y axis.
+            half = math.radians(pitch_down_deg) / 2.0
+            tip = (math.cos(half), 0.0, math.sin(half), 0.0)
+            position_m, quat_wxyz = DRONE_CAMERA_M, _quat_multiply(tip, (0.5, 0.5, -0.5, -0.5))
+            # The ROS optical frame is the USD camera turned half a turn
+            # about its x axis: z forward and y down.
+            self._camera_optical_quat = _quat_multiply(quat_wxyz, (0.0, 1.0, 0.0, 0.0))
         camera = RtxCamera(path, translations=[list(position_m)], orientations=[list(quat_wxyz)])
         from pxr import UsdGeom
 
@@ -226,11 +324,16 @@ class Simulation:
         if on_drone:
             # A drone passes close to objects, and Isaac Sim's default near
             # clip of 1 m would cut them out of the image.
-            camera.camera.set_clipping_ranges(0.01, 1000.0)
+            camera.camera.set_clipping_ranges(0.01, far_m)
             # A 90 degree horizontal field of view, wide as a drone's camera
             # is: the focal length is half the aperture.
             prim.GetFocalLengthAttr().Set(prim.GetHorizontalApertureAttr().Get() / 2.0)
         self._camera = CameraSensor(camera, resolution=resolution_hw, annotators=["rgb"])
+        if self._cesium is not None:
+            # Cesium loads the tiles that the viewport's camera sees.
+            from omni.kit.viewport.utility import get_active_viewport
+
+            get_active_viewport().camera_path = path
 
         # Both lengths are in the same unit, so their ratio is the focal
         # length in image widths. Pixels are square.
@@ -274,8 +377,10 @@ class Simulation:
         self._ros = RosPublisher()
         self._image_every = image_every
         self._steps = 0
+        # Set False to hold the camera back, as while the renderer warms up.
+        self.publish_images = True
         if self._drone is not None and self._camera is not None:
-            self._ros.publish_camera_mount(DRONE_CAMERA_M)
+            self._ros.publish_camera_mount(DRONE_CAMERA_M, self._camera_optical_quat)
 
     @property
     def ros_counts(self) -> tuple[int, int]:
@@ -286,6 +391,8 @@ class Simulation:
         """Run one Kit frame, then publish it if ROS 2 is enabled."""
         if self.before_step is not None:
             self.before_step()
+        if self._cesium is not None:
+            self._load_cesium_tiles()
         self._app.update()
         if self._ros is None:
             return
@@ -295,6 +402,8 @@ class Simulation:
             position_m, quat_wxyz, _, _ = self.drone_state()
             self._ros.publish_true_pose(now, position_m, quat_wxyz)
         self._steps += 1
+        if not self.publish_images:
+            return
         if self._camera is not None and self._steps % self._image_every == 0:
             rgb = self.camera_rgb()
             if rgb is not None:

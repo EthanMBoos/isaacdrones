@@ -124,8 +124,9 @@ def test_ros_publishes_clock_and_camera():
     match = re.search(r"isaacdrones: ros clock=(\d+) images=(\d+)", result.stdout)
     assert match, result.stdout[-3000:]
     print(match[0])
-    # Publishing starts before the renderer has an image, so the clock leads.
-    assert int(match[1]) >= int(match[2]) >= steps
+    # The clock is published while the renderer warms up, and the camera only
+    # after it, so the clock leads and the images are one per counted frame.
+    assert int(match[1]) > int(match[2]) == steps
 
 
 @pytest.mark.sim

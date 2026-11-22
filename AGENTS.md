@@ -53,9 +53,9 @@ The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
   has the steps.
 - There is no IMU. Isaac Sim's was tried and is exact, with no noise or bias,
   and it reads once per physics step, at 60 Hz. The work is on the camera.
-- Cesium for Omniverse 0.30.0 runs in Isaac Sim 6.2 headless, with the
-  conditions listed in `docs/TODO.md`. It is not in the code yet. A Cesium ion
-  token must come from the environment and never be committed.
+- `--scene campus` uses Cesium for Omniverse 0.30.0 and runs in the stock app
+  (`docs/CESIUM.md`). A Cesium ion token must come from the environment and
+  never be committed.
 - The default run stays light: the blank and cube scenes load no assets and no
   extra extensions. A detailed scene loads what it needs only when chosen.
 - The Gaussian splat work this grew out of is in the splatsim repository.

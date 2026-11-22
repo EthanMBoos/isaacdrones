@@ -19,6 +19,10 @@ sim = [
     "torch==2.11.0 ; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
+# What Cesium for Omniverse imports and cannot install for itself. The
+# extension itself is not on PyPI; see docs/CESIUM.md.
+cesium = ["lxml>=6"]
+
 [project.scripts]
 isaacdrones = "isaacdrones.app:main"
 

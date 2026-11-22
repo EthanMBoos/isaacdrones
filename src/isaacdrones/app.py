@@ -70,6 +70,17 @@ def _warehouse(sim) -> None:
     _add_drone(sim, flight.WAREHOUSE_FLIGHT)
 
 
+def _campus(sim) -> None:
+    from isaacdrones import flight
+
+    token = os.environ.get("CESIUM_ION_TOKEN")
+    if not token:
+        raise RuntimeError("Set CESIUM_ION_TOKEN to a Cesium ion token. See docs/CESIUM.md.")
+    # The middle of the Georgia Tech campus, at about ground level.
+    sim.add_cesium_tiles(latitude_deg=33.7756, longitude_deg=-84.3963, height_m=260.0, token=token)
+    _add_drone(sim, flight.CAMPUS_FLIGHT)
+
+
 # What --scene can put in the world. Each scene builds everything in it,
 # ground and lights included, and a scene with a drone gives it its flight.
 # Every mode (plain, --camera, --video, --ros, --stream) uses this table.
@@ -79,9 +90,11 @@ SCENES = {
     "falling-cube": _falling_cube,
     "drone": _drone,
     "warehouse": _warehouse,
+    "campus": _campus,
 }
-# The scenes with a drone, which carries the camera.
-DRONE_SCENES = {"drone", "warehouse"}
+# The scenes with a drone, which carries the camera, and how far down the
+# camera is tipped from the drone's nose, in degrees.
+DRONE_SCENES = {"drone": 0.0, "warehouse": 0.0, "campus": 45.0}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -110,8 +123,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=sorted(SCENES),
         help="What is in the world. drone adds a cube and a drone that flies at it, "
         "carrying the camera. warehouse flies the drone through NVIDIA's warehouse, "
-        "which is downloaded on first use. Default: empty, or cube with --camera or "
-        "--ros, or falling-cube with --video.",
+        "which is downloaded on first use. campus flies it over Georgia Tech in "
+        "Google's 3D tiles, which needs Cesium (docs/CESIUM.md). Default: empty, or "
+        "cube with --camera or --ros, or falling-cube with --video.",
     )
     parser.add_argument(
         "--stream",
@@ -174,7 +188,12 @@ def main(argv: list[str] | None = None) -> None:
 
     from isaacdrones.sim import Simulation
 
-    sim = Simulation(headless=args.headless, stream_ip=args.stream)
+    cesium_dir = None
+    if args.scene == "campus":
+        cesium_dir = os.environ.get("ISAACDRONES_CESIUM")
+        if not cesium_dir:
+            raise SystemExit("Set ISAACDRONES_CESIUM to the Cesium extension. See docs/CESIUM.md.")
+    sim = Simulation(headless=args.headless, stream_ip=args.stream, cesium_dir=cesium_dir)
     exit_code = 1
     try:
         _run(sim, args)
@@ -194,13 +213,24 @@ def _run(sim, args: argparse.Namespace) -> None:
         _stream(sim)
         return
     if has_camera:
-        sim.add_camera(on_drone=scene in DRONE_SCENES, resolution_hw=args.resolution_hw)
+        sim.add_camera(
+            on_drone=scene in DRONE_SCENES,
+            resolution_hw=args.resolution_hw,
+            pitch_down_deg=DRONE_SCENES.get(scene, 0.0),
+            far_m=100000.0 if scene == "campus" else 1000.0,
+        )
     if args.ros:
         sim.enable_ros(image_every=60 // args.image_hz)
     sim.play()
     if args.ros:
-        # Wait for the renderer, so that every counted frame has an image.
+        # Hold the camera back until the renderer has an image and, with
+        # Cesium, its tiles, so that every published image is a good one. The
+        # clock is published meanwhile, which gives a recorder time to connect.
+        sim.publish_images = False
         _wait_for_camera(sim)
+        for _ in range(60):
+            sim.step()
+        sim.publish_images = True
     if scene in DRONE_SCENES:
         sim.start_flight()
     if args.video:

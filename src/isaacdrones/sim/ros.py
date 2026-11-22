@@ -122,17 +122,16 @@ class RosPublisher:
         q.w, q.x, q.y, q.z = quat_wxyz
         self._pose.publish(pose)
 
-    def publish_camera_mount(self, position_m) -> None:
-        """Publish once where the camera sits on the drone. It looks along
-        the drone's x axis, so its optical frame is the drone's frame turned
-        to put z forward and y down.
+    def publish_camera_mount(self, position_m, quat_wxyz) -> None:
+        """Publish once where the camera sits on the drone: the pose of its
+        optical frame, z forward and y down, in the drone's frame.
         """
         mount = self._TransformStamped()
         mount.header.frame_id = "base_link"
         mount.child_frame_id = "camera_optical"
         t, q = mount.transform.translation, mount.transform.rotation
         t.x, t.y, t.z = position_m
-        q.w, q.x, q.y, q.z = 0.5, -0.5, 0.5, -0.5
+        q.w, q.x, q.y, q.z = quat_wxyz
         self._tf_static.publish(self._TFMessage(transforms=[mount]))
 
     def close(self) -> None:

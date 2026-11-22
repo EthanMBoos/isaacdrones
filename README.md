@@ -8,10 +8,10 @@ rigid body moved by a thrust and a torque, with no rotors.
 
 The goal is to find out how realistic a camera feed Isaac Sim can give a drone.
 The default scene is a cube on a ground plane and stays light. `--scene
-warehouse` flies the drone through NVIDIA's warehouse, and the next step is real
-places streamed as 3D tiles ([docs/CESIUM.md](docs/CESIUM.md)). ROS 2 is the
-only integration: no autopilot or flight stack is connected.
-[docs/TODO.md](docs/TODO.md) has the steps.
+warehouse` flies the drone through NVIDIA's warehouse, and `--scene campus`
+flies it over the Georgia Tech campus in Google's 3D tiles
+([docs/CESIUM.md](docs/CESIUM.md)). ROS 2 is the only integration: no autopilot
+or flight stack is connected. [docs/TODO.md](docs/TODO.md) has the steps.
 
 Isaac Sim needs Linux or Windows 11 on x86_64 and an NVIDIA RTX GPU. macOS
 cannot run the simulator, but the package installs there and the tests that

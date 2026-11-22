@@ -22,6 +22,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="${ISAACDRONES_SCRATCH:-$HOME/scratch/isaacdrones}"
 IMAGE_URI="docker://nvcr.io/nvidia/isaac-sim:6.2.0"
 
+CESIUM_VERSION=v0.30.0
+CESIUM_ZIP="CesiumGS-cesium-omniverse-linux-x86_64-$CESIUM_VERSION.zip"
+
 CARDS="blackwell l40s a40 h100"
 
 # ICE GPU types: card name -> partition and Slurm feature, from sinfo on
@@ -59,6 +62,7 @@ make_dirs() {
     IMAGE="$ROOT/images/isaac-sim-6.2.0.sif"
     mkdir -p "$ROOT"/{images,apptainer-cache,apptainer-tmp,uv/bin,uv/cache,uv/python,home,logs,data,runs}
     ROS_IMAGE="$ROOT/images/ros-jazzy.sif"
+    CESIUM_DIR="$ROOT/cesium/$CESIUM_VERSION"
     export APPTAINER_CACHEDIR="$ROOT/apptainer-cache"
     export APPTAINER_TMPDIR="${TMPDIR:-$ROOT/apptainer-tmp}"
 }
@@ -95,6 +99,12 @@ in_container() {
     # that cannot start here, costing ten seconds of retries per launch, so
     # it is off. To enable: OMNICLIENT_HUB_MODE=shared scripts/pace.sh run ...
     export APPTAINERENV_OMNICLIENT_HUB_MODE="${OMNICLIENT_HUB_MODE:-disabled}"
+    # For --scene campus. The token is a secret kept in a file (docs/CESIUM.md).
+    export APPTAINERENV_ISAACDRONES_CESIUM="$CESIUM_DIR"
+    if [ -r "$HOME/.cesium_token" ]; then
+        APPTAINERENV_CESIUM_ION_TOKEN="$(cat "$HOME/.cesium_token")"
+        export APPTAINERENV_CESIUM_ION_TOKEN
+    fi
     # ROS 2 nodes find each other only within one domain.
     export APPTAINERENV_ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 
@@ -152,7 +162,15 @@ setup() {
         curl -LsSf https://astral.sh/uv/install.sh |
             env UV_INSTALL_DIR="$ROOT/uv/bin" UV_NO_MODIFY_PATH=1 sh
     fi
-    in_container uv sync --extra sim
+    if [ ! -d "$CESIUM_DIR" ]; then
+        mkdir -p "$ROOT/cesium"
+        curl -LsSf -o "$ROOT/cesium/$CESIUM_ZIP" \
+            "https://github.com/CesiumGS/cesium-omniverse/releases/download/$CESIUM_VERSION/$CESIUM_ZIP"
+        python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$ROOT/cesium/$CESIUM_ZIP" "$CESIUM_DIR"
+        rm "$ROOT/cesium/$CESIUM_ZIP"
+    fi
+    in_container uv sync --extra sim --extra cesium
     echo "Setup done. Everything is under $ROOT"
 }
 

@@ -185,6 +185,11 @@ class Flight:
 # At the 1 m cube at the origin, stopping with the camera 0.3 m from its face
 # and below its top.
 CUBE_FLIGHT = Flight(start_m=(-6.0, 0.0, 0.8), end_m=(-1.0, 0.0, 0.8))
+# North over the Georgia Tech campus, 150 m above the origin of the Cesium
+# scene.
+CAMPUS_FLIGHT = Flight(
+    start_m=(0.0, -200.0, 150.0), end_m=(0.0, 200.0, 150.0), speed_mps=15.0, accel_mps2=3.0
+)
 # Across the open floor of NVIDIA's full warehouse toward its racks, stopping
 # about 4 m short of them. The warehouse spans x from -28 to 8 m and y from
 # -41 to 33 m, and its racks begin near y = 8 m.
