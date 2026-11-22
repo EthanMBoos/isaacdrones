@@ -17,26 +17,23 @@ Blackwell, and the recorder keeps every image at 20 Hz. The flight crosses the
 open floor and stops short of the racks, because their positions have not been
 mapped. A flight down an aisle needs them.
 
-Cesium for Omniverse streams real places as 3D tiles, including Google's
-photorealistic tiles. Its release 0.30.0 runs in Isaac Sim 6.2, headless on ICE:
-a public sample tileset loaded from a URL, was placed by latitude and longitude,
-and rendered through the RTX camera. Three things are needed to run it. The
-extension must be enabled when the app starts, because it registers USD schemas.
-It needs Isaac Sim's stock app, since it imports GUI extensions that the slim
-app leaves out. It needs the `lxml` package, which it cannot install for itself
-in this environment.
+Cesium for Omniverse streams real places as 3D tiles. With Google's
+photorealistic tiles it has rendered the Georgia Tech campus through the RTX
+camera, headless on ICE, from 60 m to 600 m up, looking down and at an angle.
+Buildings, trees and roads are recognizable from 150 m and above, and the detail
+softens toward the ground. [CESIUM.md](CESIUM.md) has the token setup and what
+Cesium needs from Isaac Sim.
 
-**1. Real imagery from Cesium.** The sample tileset has no texture, so the probe
-says nothing yet about how real places look. Load Google's photorealistic tiles
-over a known place and render from 150 m looking down. This needs a Cesium ion
-account and its token, read from the environment and never committed. Google's
-terms need reading before anyone builds on the tiles.
-
-**2. A Cesium scene.** Add it as a `--scene`, which starts the stock app with
+**1. A Cesium scene.** Add it as a `--scene`, which starts the stock app with
 the extension, anchors the world at a latitude and longitude, mounts the camera
-looking down and flies at altitude. Cesium chooses which tiles to load from the
-camera's view, and can be told to wait until they have loaded, which recording
-needs so that two runs of one flight match.
+looking down and flies at altitude. `scripts/pace.sh setup` downloads the
+extension and passes the token through. Cesium chooses which tiles to load from
+the camera's view, and can be told to wait until they have loaded, which
+recording needs so that two runs of one flight match.
+
+**2. Lighting.** The probe lit the tiles with an arbitrary sun and sky, and pale
+roofs came out overexposed. The tiles already contain the sunlight of the day
+they were photographed, so the scene's lights need setting to suit them.
 
 **3. Renderers.** Compare Isaac Sim's default renderer with its path-tracing
 mode on the same warehouse frames, for how they look and what they cost.
