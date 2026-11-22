@@ -16,6 +16,14 @@ velocity with the difference of the true orientation to 0.0002 rad/s. Its
 readings are in the drone's frame, with +g along z at hover. For the IMU,
 therefore, the simulator supplies the motion and none of the error.
 
+The simulator has one limit that shapes what can be done with it. Physics
+advances at 60 Hz, and the IMU gives one reading per physics step, so the IMU
+runs at 60 Hz where a real one runs at 200 Hz or more. This is acceptable for
+now because the simulated motion is smooth and has no vibration: nothing happens
+between physics steps, so a faster IMU would have nothing more to measure. Basic
+state estimation on a gentle flight is supported. Acrobatic maneuvers, fast
+rotations and motor vibration are not, because 60 Hz cannot represent them.
+
 **1. IMU noise.** A real IMU has white noise and a bias that drifts, and a
 drone's has motor vibration on top. These are added to the readings before they
 are published, with the exact readings kept on a second topic for comparison.
@@ -24,10 +32,9 @@ which one is not decided.
 
 **2. An estimator on the bag.** Run an open-source estimator on the recorded
 camera and IMU data and compare its output with the true pose. Which estimator
-is not decided. The IMU and the camera both run at 60 Hz, one reading per
-physics step, and that rate is taken as given. A visual-inertial estimator is
-usually given an IMU several times faster than its camera, so whether one works
-at equal rates is part of what this step finds out.
+is not decided. An estimator expects several IMU readings between images, so the
+camera is published at 20 Hz, every third frame, which leaves three readings
+between images.
 
 The recorder keeps every message at 640 by 480 with the simulator running
 unpaced. A larger image or a second camera may not keep up, and that has not

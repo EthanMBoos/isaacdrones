@@ -49,6 +49,9 @@ The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
   simulated sensors are for developing a real drone's software. ROS 2 is the
   only integration; no autopilot or flight stack is connected. `docs/TODO.md`
   has the steps.
+- The IMU runs at 60 Hz, one reading per physics step, and that is accepted.
+  The rig supports basic estimation on gentle flights and not acrobatic
+  maneuvers or vibration. Do not raise the physics rate to work around it.
 - The Gaussian splat work this grew out of is in the splatsim repository.
   Isaac Sim drew a splat 9 dB worse than its trainer, so splats are not a
   reason to add them back here.

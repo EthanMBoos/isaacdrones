@@ -12,6 +12,14 @@ so the next step is to give it the noise and bias of a real one. ROS 2 is the
 only integration: no autopilot or flight stack is connected.
 [docs/TODO.md](docs/TODO.md) has the steps.
 
+The simulator has one limit that shapes what can be done with it. Physics
+advances at 60 Hz, and the IMU gives one reading per physics step, so the IMU
+runs at 60 Hz where a real one runs at 200 Hz or more. This is acceptable for
+now because the simulated motion is smooth and has no vibration: nothing happens
+between physics steps, so a faster IMU would have nothing more to measure. Basic
+state estimation on a gentle flight is supported. Acrobatic maneuvers, fast
+rotations and motor vibration are not, because 60 Hz cannot represent them.
+
 Isaac Sim needs Linux or Windows 11 on x86_64 and an NVIDIA RTX GPU. macOS
 cannot run the simulator, but the package installs there and the tests that
 need no simulator run. At Georgia Tech it runs on PACE ICE; see
