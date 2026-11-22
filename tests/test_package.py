@@ -157,17 +157,6 @@ def test_drone_flies_to_the_cube():
     assert abs(z - flight.START_M[2]) < 0.05
     assert abs(w) > 0.999 and speed < 0.05
 
-    # Hovering at rest, an accelerometer reads +g along z and a gyro nothing.
-    match = re.search(
-        r"isaacdrones: imu specific_force=(\S+) (\S+) (\S+) angular_velocity=(\S+) (\S+) (\S+)",
-        result.stdout,
-    )
-    assert match, result.stdout[-3000:]
-    print(match[0])
-    ax, ay, az, *gyro = (float(match[i]) for i in range(1, 7))
-    assert abs(ax) < 0.05 and abs(ay) < 0.05 and abs(az - 9.81) < 0.05
-    assert max(abs(g) for g in gyro) < 0.01
-
 
 RESET_SCRIPT = """
 from isaacdrones.sim import Simulation

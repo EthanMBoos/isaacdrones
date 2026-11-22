@@ -1,55 +1,52 @@
 # To do
 
-The goal is to find out how good Isaac Sim's simulated sensors are for
-developing software that will run on a real drone. ROS 2 is the only
-integration: no autopilot or flight stack is connected. The steps below are in
-the order they should be taken.
+The goal is to find out how realistic a camera feed Isaac Sim can give a drone.
+ROS 2 is the only integration: no autopilot or flight stack is connected. The
+steps below are in the order they should be taken.
 
-`--scene drone` flies a rigid-body drone at a cube, with a camera on its nose
-and an IMU at its center. `--ros` publishes the clock, the camera, the IMU, the
-drone's true pose and the transform from the drone to the camera over ROS 2, and
-on ICE `scripts/pace.sh bag` records them ([PACE.md](PACE.md)).
+`--scene drone` flies a rigid-body drone at a cube, with a camera on its nose.
+`--ros` publishes the clock, the camera, the drone's true pose and the transform
+from the drone to the camera over ROS 2, and on ICE `scripts/pace.sh bag`
+records them ([PACE.md](PACE.md)). The default run stays light: the blank and
+cube scenes load no assets and no extra extensions, and a detailed scene loads
+what it needs only when it is chosen.
 
-The simulated IMU is exact. Over a recorded flight its specific force agrees
-with the second difference of the true position to 0.003 m/s^2, and its angular
-velocity with the difference of the true orientation to 0.0002 rad/s. Its
-readings are in the drone's frame, with +g along z at hover. For the IMU,
-therefore, the simulator supplies the motion and none of the error.
+**1. Scenes that bring their own flight.** `--scene` gains scenes that each
+declare their assets, the drone's flight and where its camera points. The blank
+and cube scenes are unchanged, and a test holds the default run to loading
+nothing more than it does now.
 
-The simulator has one limit that shapes what can be done with it. Physics
-advances at 60 Hz, and the IMU gives one reading per physics step, so the IMU
-runs at 60 Hz where a real one runs at 200 Hz or more. This is acceptable for
-now because the simulated motion is smooth and has no vibration: nothing happens
-between physics steps, so a faster IMU would have nothing more to measure. Basic
-state estimation on a gentle flight is supported. Acrobatic maneuvers, fast
-rotations and motor vibration are not, because 60 Hz cannot represent them.
+**2. The warehouse.** Load NVIDIA's full warehouse from the hosted Isaac Sim
+assets, fly the drone down an aisle, and record a bag and a video on ICE. This
+also measures how long the first load takes and whether the downloaded assets
+are kept between jobs.
 
-**1. IMU noise.** A real IMU has white noise and a bias that drifts, and a
-drone's has motor vibration on top. These are added to the readings before they
-are published, with the exact readings kept on a second topic for comparison.
-The noise densities and bias drift come from the datasheet of a real IMU, and
-which one is not decided.
+**3. Camera settings.** Raise the resolution from 640 by 480 (e.g., to 1280 by
+720), publish at 20 Hz, and compare Isaac Sim's default renderer with its
+path-tracing mode on the same frames. The recorder has only been checked at 640
+by 480.
 
-**2. An estimator on the bag.** Run an open-source estimator on the recorded
-camera and IMU data and compare its output with the true pose. Which estimator
-is not decided. An estimator expects several IMU readings between images, so the
-camera is published at 20 Hz, every third frame, which leaves three readings
-between images.
+**4. Cesium, as a probe.** Cesium for Omniverse streams real places as 3D tiles,
+including Google's photorealistic tiles. Its latest release targets Isaac Sim
+6.0.1, and nothing found says whether it runs on 6.2 or headless. The probe
+installs it on ICE, loads the tiles over a known place and renders from 150 m
+looking down. The result is whether to go on, and why. It needs a Cesium ion
+token, read from the environment and never committed. Google's terms need
+reading before anyone builds on the tiles.
 
-The recorder keeps every message at 640 by 480 with the simulator running
-unpaced. A larger image or a second camera may not keep up, and that has not
-been tried.
+**5. A Cesium scene, if the probe passes.** Anchor the world at a latitude and
+longitude, mount the camera looking down, fly at altitude, and wait for the
+tiles to load before recording. Streamed tiles can load differently from run to
+run, so two runs of one flight may not match.
 
 `--video` and `--stream` have not run since the camera code last changed. RTX
 lidar and radar are untried.
 
 Later, each when something needs it:
 
+- lens distortion and sensor noise from Isaac Sim's camera pipeline;
+- a measure of how realistic the feed is, possibly against the real flights in
+  splatsim;
 - a rotor model, and collisions between the drone and the scene: the cube has
   no collider, so the drone would pass through it;
-- a flight with more motion than a straight line, which an estimator needs to
-  observe the IMU's biases;
-- RTX lidar and radar on the drone;
-- a comparison of the simulated sensors with a real flight log, which is not
-  decided;
 - pacing to real time outside `--stream`.

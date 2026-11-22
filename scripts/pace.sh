@@ -132,7 +132,7 @@ record_bag() {
     # Other people's nodes on the cluster use domain 0.
     export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-$((${SLURM_JOB_ID:-$$} % 100 + 1))}"
     in_ros ros2 bag record --output "$bag" /clock /camera/image_raw /camera/camera_info \
-        /imu /truth/pose /tf_static &
+        /truth/pose /tf_static &
     local recorder=$!
     local status=0
     in_container uv run isaacdrones --headless --ros "$@" || status=$?

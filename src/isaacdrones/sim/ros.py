@@ -31,7 +31,7 @@ def library_path() -> Path | None:
 
 class RosPublisher:
     """Publishes `/clock`, and each of these when given the data:
-    `/camera/image_raw` with `/camera/camera_info`, `/imu`, `/truth/pose`, and
+    `/camera/image_raw` with `/camera/camera_info`, `/truth/pose`, and
     on `/tf_static` the transform from the drone to its camera. Create it
     after `SimulationApp` has started.
 
@@ -54,7 +54,7 @@ class RosPublisher:
         from geometry_msgs.msg import PoseStamped, TransformStamped
         from rclpy.qos import DurabilityPolicy, QoSProfile
         from rosgraph_msgs.msg import Clock
-        from sensor_msgs.msg import CameraInfo, Image, Imu
+        from sensor_msgs.msg import CameraInfo, Image
         from tf2_msgs.msg import TFMessage
 
         self._rclpy = rclpy
@@ -64,17 +64,15 @@ class RosPublisher:
         self._clock = self._node.create_publisher(Clock, "/clock", 10)
         self._image = self._node.create_publisher(Image, "/camera/image_raw", 10)
         self._info = self._node.create_publisher(CameraInfo, "/camera/camera_info", 10)
-        self._imu = self._node.create_publisher(Imu, "/imu", 100)
         self._pose = self._node.create_publisher(PoseStamped, "/truth/pose", 100)
         # Latched, as static transforms are: a late subscriber still gets it.
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._tf_static = self._node.create_publisher(TFMessage, "/tf_static", latched)
         self._Clock, self._Image, self._CameraInfo = Clock, Image, CameraInfo
-        self._Imu, self._PoseStamped = Imu, PoseStamped
+        self._PoseStamped = PoseStamped
         self._TransformStamped, self._TFMessage = TransformStamped, TFMessage
         self.clock_count = 0
         self.image_count = 0
-        self.imu_count = 0
 
     def _stamp(self, time_s: float):
         from builtin_interfaces.msg import Time
@@ -114,18 +112,6 @@ class RosPublisher:
         info.p = [focal_px, 0.0, cx, 0.0, 0.0, focal_px, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
         self._info.publish(info)
         self.image_count += 1
-
-    def publish_imu(self, time_s: float, specific_force_mps2, angular_velocity_radps) -> None:
-        imu = self._Imu()
-        imu.header.stamp = self._stamp(time_s)
-        imu.header.frame_id = "base_link"
-        acc, gyro = imu.linear_acceleration, imu.angular_velocity
-        acc.x, acc.y, acc.z = specific_force_mps2
-        gyro.x, gyro.y, gyro.z = angular_velocity_radps
-        # An IMU does not measure orientation, and -1 here says so.
-        imu.orientation_covariance[0] = -1.0
-        self._imu.publish(imu)
-        self.imu_count += 1
 
     def publish_true_pose(self, time_s: float, position_m, quat_wxyz) -> None:
         pose = self._PoseStamped()

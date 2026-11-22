@@ -42,16 +42,17 @@ The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
 - The repository holds a boot, a fixed-rate loop, an RTX camera, a cube scene
   and `--ros`, which publishes the clock and camera over ROS 2 from `rclpy`
   (`src/isaacdrones/sim/ros.py`). `--scene drone` flies a rigid-body drone at
-  the cube with a camera on its nose and an IMU at its center, and `--ros`
-  then also publishes `/imu`, `/truth/pose` and `/tf_static`. `src/isaacdrones/flight.py` holds the
+  the cube with a camera on its nose, and `--ros` then also publishes
+  `/truth/pose` and `/tf_static`. `src/isaacdrones/flight.py` holds the
   controller and the flight; it exists to give the sensors a flight to record
-  and is not a flight controller under study. The direction is to find out how good the
-  simulated sensors are for developing a real drone's software. ROS 2 is the
+  and is not a flight controller under study. The direction is to find out how realistic a
+  camera feed Isaac Sim can give a drone, in a detailed scene. ROS 2 is the
   only integration; no autopilot or flight stack is connected. `docs/TODO.md`
   has the steps.
-- The IMU runs at 60 Hz, one reading per physics step, and that is accepted.
-  The rig supports basic estimation on gentle flights and not acrobatic
-  maneuvers or vibration. Do not raise the physics rate to work around it.
+- There is no IMU. Isaac Sim's was tried and is exact, with no noise or bias,
+  and it reads once per physics step, at 60 Hz. The work is on the camera.
+- The default run stays light: the blank and cube scenes load no assets and no
+  extra extensions. A detailed scene loads what it needs only when chosen.
 - The Gaussian splat work this grew out of is in the splatsim repository.
   Isaac Sim drew a splat 9 dB worse than its trainer, so splats are not a
   reason to add them back here.

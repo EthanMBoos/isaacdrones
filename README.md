@@ -3,22 +3,14 @@
 isaacdrones is a small base for simulating aerial drones in [NVIDIA Isaac
 Sim](https://docs.isaacsim.omniverse.nvidia.com/latest/) 6.2. It starts Isaac
 Sim in under 10 s, advances physics by a fixed timestep, and flies a drone that
-carries an RTX camera and an IMU, whose data is published over ROS 2. The drone
-is a rigid body moved by a thrust and a torque, with no rotors.
+carries an RTX camera, whose images are published over ROS 2. The drone is a
+rigid body moved by a thrust and a torque, with no rotors.
 
-The goal is to find out how good Isaac Sim's simulated sensors are for
-developing software that will run on a real drone. The simulated IMU is exact,
-so the next step is to give it the noise and bias of a real one. ROS 2 is the
-only integration: no autopilot or flight stack is connected.
-[docs/TODO.md](docs/TODO.md) has the steps.
-
-The simulator has one limit that shapes what can be done with it. Physics
-advances at 60 Hz, and the IMU gives one reading per physics step, so the IMU
-runs at 60 Hz where a real one runs at 200 Hz or more. This is acceptable for
-now because the simulated motion is smooth and has no vibration: nothing happens
-between physics steps, so a faster IMU would have nothing more to measure. Basic
-state estimation on a gentle flight is supported. Acrobatic maneuvers, fast
-rotations and motor vibration are not, because 60 Hz cannot represent them.
+The goal is to find out how realistic a camera feed Isaac Sim can give a drone.
+The default scene is a cube on a ground plane and stays light. The next steps
+put the drone in a detailed scene, first NVIDIA's warehouse and then real places
+streamed as 3D tiles. ROS 2 is the only integration: no autopilot or flight
+stack is connected. [docs/TODO.md](docs/TODO.md) has the steps.
 
 Isaac Sim needs Linux or Windows 11 on x86_64 and an NVIDIA RTX GPU. macOS
 cannot run the simulator, but the package installs there and the tests that
@@ -44,7 +36,7 @@ uv run isaacdrones --headless --steps 100       # no window, 100 frames
 uv run isaacdrones --headless --camera out.png  # one image of the cube
 uv run isaacdrones --headless --ros --scene drone --steps 600
                                                 # a flight at the cube, with the
-                                                # camera and IMU over ROS 2
+                                                # drone's camera over ROS 2
 uv run isaacdrones --help                       # every flag
 ```
 

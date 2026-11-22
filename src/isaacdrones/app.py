@@ -34,7 +34,6 @@ def _add_drone(sim) -> None:
     drone = flight.Drone()
     sim.add_cube()
     sim.add_drone(position_m=flight.START_M, mass_kg=drone.mass_kg, size_m=drone.size_m)
-    sim.add_imu()
     started_at = [None]
 
     def fly() -> None:
@@ -91,8 +90,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Add a cube and a camera, and publish /clock, /camera/image_raw and "
         "/camera/camera_info over ROS 2, stamped with simulation time. With "
-        "--scene drone the camera is the drone's, and /imu, /truth/pose and "
-        "/tf_static are published too.",
+        "--scene drone the camera is the drone's, and /truth/pose and /tf_static "
+        "are published too.",
     )
     return parser.parse_args(argv)
 
@@ -180,18 +179,9 @@ def _run(sim, args: argparse.Namespace) -> None:
             + f"{sum(c * c for c in velocity) ** 0.5:.3f}",
             flush=True,
         )
-    if scene == "drone":
-        force, gyro = sim.imu_reading()
-        print(
-            "isaacdrones: imu specific_force="
-            + " ".join(f"{c:.3f}" for c in force)
-            + " angular_velocity="
-            + " ".join(f"{c:.3f}" for c in gyro),
-            flush=True,
-        )
     if args.ros:
-        clock, images, imu = sim.ros_counts
-        print(f"isaacdrones: ros clock={clock} images={images} imu={imu}", flush=True)
+        clock, images = sim.ros_counts
+        print(f"isaacdrones: ros clock={clock} images={images}", flush=True)
     if args.camera:
         _save_camera_image(sim, args.camera)
 
