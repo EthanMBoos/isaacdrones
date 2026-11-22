@@ -2,8 +2,8 @@
 
 The drone is a rigid body that takes a thrust along its own z axis and a
 torque, with no rotors. This controller turns a target position into that
-thrust and torque. It is here so that the simulated sensors have a flight to
-record, and it is not a model of a flight controller.
+thrust and torque. It is here so that the camera has a flight to record, and it is
+not a model of a flight controller.
 
 The body frame is x forward, y left, z up. Quaternions are wxyz and rotate
 body vectors into the world. Pure Python, so it runs without Isaac Sim.
@@ -68,6 +68,7 @@ def wrench(
     target_m: Vec,
     target_velocity_mps: Vec = (0.0, 0.0, 0.0),
     target_accel_mps2: Vec = (0.0, 0.0, 0.0),
+    yaw_rad: float = 0.0,
     *,
     position_gain: float = 4.0,
     velocity_gain: float = 3.0,
@@ -79,7 +80,7 @@ def wrench(
     The target's acceleration and the position error set an acceleration.
     The drone can only push along its z axis, so the thrust is the part of
     that acceleration along z, and the torque turns z toward the rest. The
-    nose is kept pointing along world x.
+    nose is kept at `yaw_rad` from world x, about world z.
     """
     accel = tuple(
         target_accel_mps2[i]
@@ -94,7 +95,7 @@ def wrench(
     thrust_n = max(0.0, drone.mass_kg * sum(accel[i] * body_z[i] for i in range(3)))
 
     want_z = _unit(accel)
-    want_y = _unit(_cross(want_z, (1.0, 0.0, 0.0)))
+    want_y = _unit(_cross(want_z, (math.cos(yaw_rad), math.sin(yaw_rad), 0.0)))
     want_x = _cross(want_y, want_z)
     # The rotation error, as a vector in the body frame: half of what is left
     # of Rd^T R - R^T Rd.
@@ -115,34 +116,78 @@ def wrench(
     return thrust_n, torque_nm
 
 
-# The flight: hover, then fly at the 1 m cube at the origin and stop with the
-# camera 0.3 m from its face, below its top. The speed ramps up and down,
-# because a target that stops dead makes the drone overshoot into the cube.
-START_M: Vec = (-6.0, 0.0, 0.8)
-STOP_X_M = -1.0
-HOVER_S = 1.0
-SPEED_MPS = 1.0
-ACCEL_MPS2 = 0.5
-_RAMP_S = SPEED_MPS / ACCEL_MPS2
-_CRUISE_S = (STOP_X_M - START_M[0]) / SPEED_MPS - _RAMP_S
-FLIGHT_S = HOVER_S + 2 * _RAMP_S + _CRUISE_S
-
-
-def target(time_s: float) -> tuple[Vec, Vec, Vec]:
-    """Target position, velocity and acceleration `time_s` after the flight
-    starts. Before it starts, at negative times, the target is the start.
+@dataclass(frozen=True)
+class Flight:
+    """Hover at `start_m`, fly a straight line to `end_m` with the nose along
+    it, and hover there. The speed ramps up and down, because a target that
+    stops dead makes the drone overshoot.
     """
-    t = min(max(0.0, time_s - HOVER_S), 2 * _RAMP_S + _CRUISE_S)
-    left = 2 * _RAMP_S + _CRUISE_S - t
-    if t <= 0.0 or left <= 0.0:
-        speed, accel = 0.0, 0.0
-        distance = 0.0 if t <= 0.0 else STOP_X_M - START_M[0]
-    elif t < _RAMP_S:
-        speed, accel, distance = ACCEL_MPS2 * t, ACCEL_MPS2, 0.5 * ACCEL_MPS2 * t * t
-    elif left > _RAMP_S:
-        speed, accel, distance = SPEED_MPS, 0.0, SPEED_MPS * (t - 0.5 * _RAMP_S)
-    else:
-        speed, accel = ACCEL_MPS2 * left, -ACCEL_MPS2
-        distance = (STOP_X_M - START_M[0]) - 0.5 * ACCEL_MPS2 * left * left
-    position = (START_M[0] + distance, START_M[1], START_M[2])
-    return position, (speed, 0.0, 0.0), (accel, 0.0, 0.0)
+
+    start_m: Vec
+    end_m: Vec
+    hover_s: float = 1.0
+    speed_mps: float = 1.0
+    accel_mps2: float = 0.5
+
+    @property
+    def _length_m(self) -> float:
+        return math.dist(self.start_m, self.end_m)
+
+    @property
+    def _ramp_s(self) -> float:
+        return self.speed_mps / self.accel_mps2
+
+    @property
+    def _moving_s(self) -> float:
+        # The line must be long enough to reach full speed.
+        return self._length_m / self.speed_mps + self._ramp_s
+
+    @property
+    def duration_s(self) -> float:
+        return self.hover_s + self._moving_s
+
+    @property
+    def yaw_rad(self) -> float:
+        return math.atan2(self.end_m[1] - self.start_m[1], self.end_m[0] - self.start_m[0])
+
+    @property
+    def start_quat_wxyz(self) -> tuple[float, float, float, float]:
+        return (math.cos(self.yaw_rad / 2), 0.0, 0.0, math.sin(self.yaw_rad / 2))
+
+    def target(self, time_s: float) -> tuple[Vec, Vec, Vec, float]:
+        """What `wrench` takes after the state: target position, velocity and
+        acceleration, and yaw, `time_s` after the flight starts. Before it
+        starts, at negative times, the target is the start.
+        """
+        t = min(max(0.0, time_s - self.hover_s), self._moving_s)
+        left = self._moving_s - t
+        if t <= 0.0 or left <= 0.0:
+            speed, accel = 0.0, 0.0
+            distance = 0.0 if t <= 0.0 else self._length_m
+        elif t < self._ramp_s:
+            speed, accel = self.accel_mps2 * t, self.accel_mps2
+            distance = 0.5 * self.accel_mps2 * t * t
+        elif left > self._ramp_s:
+            speed, accel = self.speed_mps, 0.0
+            distance = self.speed_mps * (t - 0.5 * self._ramp_s)
+        else:
+            speed, accel = self.accel_mps2 * left, -self.accel_mps2
+            distance = self._length_m - 0.5 * self.accel_mps2 * left * left
+        along = tuple((self.end_m[i] - self.start_m[i]) / self._length_m for i in range(3))
+        return (
+            tuple(self.start_m[i] + distance * along[i] for i in range(3)),
+            tuple(speed * c for c in along),
+            tuple(accel * c for c in along),
+            self.yaw_rad,
+        )
+
+
+# At the 1 m cube at the origin, stopping with the camera 0.3 m from its face
+# and below its top.
+CUBE_FLIGHT = Flight(start_m=(-6.0, 0.0, 0.8), end_m=(-1.0, 0.0, 0.8))
+# Across the open floor of NVIDIA's full warehouse toward its racks, stopping
+# about 4 m short of them. The warehouse spans x from -28 to 8 m and y from
+# -41 to 33 m, and its racks begin near y = 8 m.
+WAREHOUSE_FLIGHT = Flight(
+    start_m=(-10.0, -20.0, 2.0), end_m=(-10.0, 4.0, 2.0), speed_mps=2.0, accel_mps2=1.0
+)

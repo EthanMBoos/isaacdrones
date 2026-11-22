@@ -11,41 +11,77 @@ import sys
 import time
 import traceback
 
-# Limit on the wait for the renderer's first camera image.
-CAMERA_WAIT_S = 180
+# Limit on the wait for the renderer's first camera image. The warehouse
+# takes about three minutes the first time, most of it loading materials.
+CAMERA_WAIT_S = 600
 
 
-# What --scene can put in the world besides the ground and lights. Every mode
-# (plain, --camera, --video, --stream) uses this table.
-SCENES = {
-    "empty": lambda sim: None,
-    "cube": lambda sim: sim.add_cube(),
-    "falling-cube": lambda sim: sim.add_cube(falling=True),
-    "drone": lambda sim: _add_drone(sim),
-}
-
-
-def _add_drone(sim) -> None:
-    """A cube, and a drone that hovers until `sim.start_flight()` and then
-    flies at the cube. A camera, if there is one, rides on the drone.
+def _add_drone(sim, route) -> None:
+    """A drone that hovers at the start of `route` until `sim.start_flight()`
+    and then flies it. A camera, if there is one, rides on the drone.
     """
     from isaacdrones import flight
 
     drone = flight.Drone()
-    sim.add_cube()
-    sim.add_drone(position_m=flight.START_M, mass_kg=drone.mass_kg, size_m=drone.size_m)
+    sim.add_drone(
+        position_m=route.start_m,
+        quat_wxyz=route.start_quat_wxyz,
+        mass_kg=drone.mass_kg,
+        size_m=drone.size_m,
+    )
     started_at = [None]
 
     def fly() -> None:
         elapsed = -1.0 if started_at[0] is None else sim.time - started_at[0]
         state = flight.State(*sim.drone_state())
-        sim.apply_drone_wrench(*flight.wrench(drone, state, *flight.target(elapsed)))
+        sim.apply_drone_wrench(*flight.wrench(drone, state, *route.target(elapsed)))
 
     def start_flight() -> None:
         started_at[0] = sim.time
 
     sim.before_step = fly
     sim.start_flight = start_flight
+
+
+def _cube(sim) -> None:
+    sim.add_ground_and_light()
+    sim.add_cube()
+
+
+def _falling_cube(sim) -> None:
+    sim.add_ground_and_light()
+    sim.add_cube(falling=True)
+
+
+def _drone(sim) -> None:
+    from isaacdrones import flight
+
+    _cube(sim)
+    _add_drone(sim, flight.CUBE_FLIGHT)
+
+
+def _warehouse(sim) -> None:
+    from isaacdrones import flight
+
+    # The warehouse has its own floor and lights.
+    sim.add_isaac_asset(
+        "/Isaac/Environments/Simple_Warehouse/full_warehouse.usd", "/World/Warehouse"
+    )
+    _add_drone(sim, flight.WAREHOUSE_FLIGHT)
+
+
+# What --scene can put in the world. Each scene builds everything in it,
+# ground and lights included, and a scene with a drone gives it its flight.
+# Every mode (plain, --camera, --video, --ros, --stream) uses this table.
+SCENES = {
+    "empty": lambda sim: sim.add_ground_and_light(),
+    "cube": _cube,
+    "falling-cube": _falling_cube,
+    "drone": _drone,
+    "warehouse": _warehouse,
+}
+# The scenes with a drone, which carries the camera.
+DRONE_SCENES = {"drone", "warehouse"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -72,9 +108,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--scene",
         choices=sorted(SCENES),
-        help="What is in the world besides the ground and lights. drone adds a cube "
-        "and a drone that flies at it, carrying the camera. Default: empty, or cube "
-        "with --camera or --ros, or falling-cube with --video.",
+        help="What is in the world. drone adds a cube and a drone that flies at it, "
+        "carrying the camera. warehouse flies the drone through NVIDIA's warehouse, "
+        "which is downloaded on first use. Default: empty, or cube with --camera or "
+        "--ros, or falling-cube with --video.",
     )
     parser.add_argument(
         "--stream",
@@ -93,7 +130,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--scene drone the camera is the drone's, and /truth/pose and /tf_static "
         "are published too.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--resolution",
+        default="640x480",
+        metavar="WxH",
+        help="The camera's image size in pixels. Default: 640x480.",
+    )
+    parser.add_argument(
+        "--image-hz",
+        type=int,
+        default=60,
+        choices=[60, 30, 20, 15, 12, 10],
+        help="How often --ros publishes the camera, in simulated time. Default: 60, every frame.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        width, height = (int(n) for n in args.resolution.lower().split("x"))
+    except ValueError:
+        parser.error("--resolution takes WIDTHxHEIGHT, as in 1280x720")
+    args.resolution_hw = (height, width)
+    return args
 
 
 def _restart_with_ros_libraries() -> None:
@@ -131,7 +187,6 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _run(sim, args: argparse.Namespace) -> None:
-    sim.add_ground_and_light()
     has_camera = bool(args.video or args.camera or args.ros)
     scene = args.scene or ("falling-cube" if args.video else "cube" if has_camera else "empty")
     SCENES[scene](sim)
@@ -139,14 +194,14 @@ def _run(sim, args: argparse.Namespace) -> None:
         _stream(sim)
         return
     if has_camera:
-        sim.add_camera(on_drone=scene == "drone")
+        sim.add_camera(on_drone=scene in DRONE_SCENES, resolution_hw=args.resolution_hw)
     if args.ros:
-        sim.enable_ros()
+        sim.enable_ros(image_every=60 // args.image_hz)
     sim.play()
     if args.ros:
         # Wait for the renderer, so that every counted frame has an image.
         _wait_for_camera(sim)
-    if scene == "drone":
+    if scene in DRONE_SCENES:
         sim.start_flight()
     if args.video:
         _save_video(sim, args.video, args.steps or 120)
@@ -168,7 +223,7 @@ def _run(sim, args: argparse.Namespace) -> None:
         f"physics_steps={sim.num_physics_steps} engine={sim.physics_engine}",
         flush=True,
     )
-    if scene == "drone":
+    if scene in DRONE_SCENES:
         position, quat, velocity, _ = sim.drone_state()
         print(
             "isaacdrones: drone position="

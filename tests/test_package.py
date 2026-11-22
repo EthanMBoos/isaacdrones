@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -29,6 +30,8 @@ def test_parse_args():
     assert parse_args(["--stream"]).stream == "127.0.0.1"
     assert parse_args(["--stream", "10.0.0.5"]).stream == "10.0.0.5"
     assert parse_args(["--ros"]).ros and not args.ros
+    assert args.resolution_hw == (480, 640) and args.image_hz == 60
+    assert parse_args(["--resolution", "1280x720"]).resolution_hw == (720, 1280)
 
 
 def test_isaac_sim_only_imported_in_sim_package():
@@ -70,6 +73,8 @@ def test_boot_headless():
     frames, elapsed, dt, engine = int(match[1]), float(match[2]), float(match[4]), match[6]
     assert frames == steps
     assert engine == "physx"
+    # The default run stays light: the ROS 2 bridge loads only with --ros.
+    assert "isaacsim.ros2" not in result.stdout
     # One physics step per frame.
     assert abs(elapsed - steps * dt) <= dt * 0.01
 
@@ -129,7 +134,8 @@ def test_drone_flies_to_the_cube():
     from isaacdrones import flight
 
     # Long enough to finish the flight and settle.
-    seconds = flight.FLIGHT_S + 3.0
+    route = flight.CUBE_FLIGHT
+    seconds = route.duration_s + 3.0
     result = subprocess.run(
         [
             sys.executable,
@@ -153,9 +159,44 @@ def test_drone_flies_to_the_cube():
     assert match, result.stdout[-3000:]
     print(match[0])
     x, y, z, w, speed = (float(match[i]) for i in range(1, 6))
-    assert abs(x - flight.STOP_X_M) < 0.05 and abs(y) < 0.05
-    assert abs(z - flight.START_M[2]) < 0.05
+    assert abs(x - route.end_m[0]) < 0.05 and abs(y) < 0.05
+    assert abs(z - route.end_m[2]) < 0.05
     assert abs(w) > 0.999 and speed < 0.05
+
+
+@pytest.mark.sim
+def test_drone_flies_through_the_warehouse():
+    # Downloads NVIDIA's warehouse on first use, so it needs the internet.
+    pytest.importorskip("isaacsim")
+    from isaacdrones import flight
+
+    route = flight.WAREHOUSE_FLIGHT
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "isaacdrones.app",
+            "--headless",
+            "--scene",
+            "warehouse",
+            "--steps",
+            str(round((route.duration_s + 3.0) * 60)),
+            "--camera",
+            "warehouse.png",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+        cwd=os.environ.get("TMPDIR", "/tmp"),
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    match = re.search(r"isaacdrones: drone position=(\S+) (\S+) (\S+) ", result.stdout)
+    assert match, result.stdout[-3000:]
+    print(match[0])
+    assert max(abs(float(match[i + 1]) - route.end_m[i]) for i in range(3)) < 0.05
+    # Racks, boxes and lights are far from a flat image.
+    match = re.search(r"isaacdrones: camera shape=.* spread=(\S+)", result.stdout)
+    assert match and float(match[1]) > 20.0, result.stdout[-3000:]
 
 
 RESET_SCRIPT = """
@@ -237,7 +278,7 @@ def test_cube_pose_falls_and_lands():
     assert abs(sum(q * q for q in end[3:]) - 1.0) < 1e-3
 
 
-def _fly(seconds, start, goal_at):
+def _fly(seconds, start, goal_at, quat=(1.0, 0.0, 0.0, 0.0)):
     """Integrate a rigid body under the controller, without Isaac Sim, at the
     simulator's rate. `goal_at(t)` gives the arguments of `wrench` after the state.
     Returns the positions, and the final velocity and quaternion.
@@ -246,7 +287,7 @@ def _fly(seconds, start, goal_at):
 
     drone, dt = Drone(), 1.0 / 60.0
     position, velocity = list(start), [0.0, 0.0, 0.0]
-    quat, rate = [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0]  # rate is in the body frame
+    quat, rate = list(quat), [0.0, 0.0, 0.0]  # rate is in the body frame
     inertia = drone.inertia_kgm2
     path = []
     for step in range(round(seconds / dt)):
@@ -291,8 +332,23 @@ def test_controller_flies_a_rigid_body_to_its_target():
 def test_flight_stops_short_of_the_cube():
     from isaacdrones import flight
 
-    path, velocity, _ = _fly(flight.FLIGHT_S + 3.0, flight.START_M, flight.target)
-    assert abs(path[-1][0] - flight.STOP_X_M) < 0.02 and max(abs(v) for v in velocity) < 0.02
+    route = flight.CUBE_FLIGHT
+    path, velocity, _ = _fly(route.duration_s + 3.0, route.start_m, route.target)
+    assert abs(path[-1][0] - route.end_m[0]) < 0.02 and max(abs(v) for v in velocity) < 0.02
     # The camera is 0.2 m ahead of center and the cube's face is at -0.5 m.
     assert max(x for x, _, _ in path) + 0.2 < -0.5 - 0.2
-    assert max(abs(z - flight.START_M[2]) for _, _, z in path) < 0.05
+    assert max(abs(z - route.start_m[2]) for _, _, z in path) < 0.05
+
+
+def test_flight_follows_a_line_in_any_direction():
+    from isaacdrones.flight import Flight
+
+    # Along -y and climbing, so the nose must turn a quarter turn to the right.
+    route = Flight(start_m=(1.0, 4.0, 1.0), end_m=(1.0, -2.0, 2.0))
+    assert abs(route.yaw_rad + 3.14159265 / 2) < 1e-6
+    path, velocity, quat = _fly(route.duration_s + 3.0, route.start_m, route.target)
+    assert max(abs(path[-1][i] - route.end_m[i]) for i in range(3)) < 0.02
+    assert max(abs(v) for v in velocity) < 0.02
+    assert max(abs(x - 1.0) for x, _, _ in path) < 0.05
+    # Level, turned -90 degrees about z.
+    assert abs(abs(quat[0]) - 0.7071) < 0.01 and abs(abs(quat[3]) - 0.7071) < 0.01

@@ -12,7 +12,7 @@ used. The script runs `uv sync --extra sim` in the container, so ICE gets the
 versions in `uv.lock`, as any Linux machine would. The cost is that Isaac Sim is
 stored twice, in the image and in the environment.
 
-A fresh `setup` takes about 16 minutes. `uv run pytest` then reports 11 passed on
+A fresh `setup` takes about 16 minutes. `uv run pytest` then reports 13 passed on
 a Blackwell in about 3 minutes, and the tests also pass on an H100. Isaac Sim
 starts in under 10 s with this repository's app file, against one to three
 minutes for the stock app. `stream` and `--video` have not run since the camera
@@ -30,7 +30,7 @@ pace-quota               # setup adds 55 GB and 245,000 files to scratch
 scripts/pace.sh node     # wait for a CPU node; the prompt changes
 cd ~/isaacdrones
 scripts/pace.sh setup    # pulls the image and installs Isaac Sim
-scripts/pace.sh run uv run pytest -m "not sim"    # expect 5 passed
+scripts/pace.sh run uv run pytest -m "not sim"    # expect 6 passed
 exit                     # release the node
 ```
 
@@ -38,7 +38,7 @@ To queue a command on a GPU node, from the login node:
 
 ```bash
 scripts/pace.sh cards                  # card types and what is busy
-scripts/pace.sh batch uv run pytest    # expect 11 passed
+scripts/pace.sh batch uv run pytest    # expect 13 passed
 squeue --me                            # PD = waiting, R = running
 tail -60 ~/scratch/isaacdrones/logs/JOBID.log
 ```
@@ -55,22 +55,25 @@ exit                     # release the GPU
 To record a run to a ROS 2 bag, from the login node:
 
 ```bash
-scripts/pace.sh bag flight --scene drone --steps 600
+scripts/pace.sh bag flight --scene warehouse --steps 1020 \
+    --resolution 1280x720 --image-hz 20
 tail -60 ~/scratch/isaacdrones/logs/JOBID.log    # ends with the bag's contents
 ls ~/scratch/isaacdrones/runs/flight             # an .mcap file and metadata
 ```
 
 `bag NAME` runs `isaacdrones --headless --ros` with the arguments after the
 name, and records to `runs/NAME` the topics it publishes: `/clock`,
-`/camera/image_raw` and `/camera/camera_info`, and with the drone `/truth/pose` and
-`/tf_static`. The simulator publishes with ROS 2 libraries
-that Isaac Sim ships, but its image has no ROS 2 tools, so the recorder runs in
-a second container, ROS 2 Jazzy, on the same node. The two find each other
-because containers on a node share its network. Each job takes its own
-`ROS_DOMAIN_ID`, so it does not hear other people's nodes. `scripts/pace.sh ros
-CMD` runs any command in that container on a compute node, as in
-`scripts/pace.sh ros ros2 bag info flight`. The 10 s flight at 640 by 480 is a
-555 MB bag, and it opens on a laptop in ROS 2 or Foxglove.
+`/camera/image_raw` and `/camera/camera_info`, and with a drone `/truth/pose`
+and `/tf_static`. The simulator publishes with ROS 2 libraries that Isaac Sim
+ships, but its image has no ROS 2 tools, so the recorder runs in a second
+container, ROS 2 Jazzy, on the same node. The two find each other because
+containers on a node share its network. Each job takes its own `ROS_DOMAIN_ID`,
+so it does not hear other people's nodes. `scripts/pace.sh ros CMD` runs any
+command in that container on a compute node, as in `scripts/pace.sh ros ros2 bag
+info flight`. The 17 s warehouse flight at 1280 by 720 and 20 Hz is a 930 MB
+bag, and it opens on a laptop in ROS 2 or Foxglove. Compute nodes reach the
+internet, which the warehouse needs the first time: its assets are downloaded
+from NVIDIA and kept in scratch.
 
 `gpu`, `batch`, `bag` and `stream` take a card name before the command: `blackwell`
 (the default), `l40s`, `a40` or `h100`, as in `scripts/pace.sh batch h100 uv

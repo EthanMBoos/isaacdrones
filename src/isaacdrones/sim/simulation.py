@@ -95,6 +95,24 @@ class Simulation:
         DistantLight("/World/DistantLight").set_intensities(300)
         DomeLight("/World/DomeLight").set_intensities(500)
 
+    def add_isaac_asset(self, asset: str, path: str) -> None:
+        """Add one of NVIDIA's hosted Isaac Sim assets to the stage at `path`.
+        `asset` is its path under the asset root, as the Isaac Sim
+        documentation lists it (e.g., `/Isaac/Environments/Office/office.usd`).
+        It is downloaded on first use, which needs the internet.
+        """
+        import isaacsim.core.experimental.utils.stage as stage_utils
+        from isaacsim.core.experimental.utils.app import enable_extension
+
+        enable_extension("isaacsim.storage.native")
+        self._app.update()
+        from isaacsim.storage.native import get_assets_root_path
+
+        root = get_assets_root_path()
+        if root is None:
+            raise RuntimeError("Isaac Sim's hosted assets could not be reached.")
+        stage_utils.add_reference_to_stage(usd_path=root + asset, path=path)
+
     def add_cube(self, *, falling: bool = False) -> None:
         """Add an orange cube: a 1 m cube resting at the origin, or with
         `falling` a 0.6 m rigid body that starts 2 m up, tilted and spinning.
@@ -131,6 +149,7 @@ class Simulation:
         self,
         *,
         position_m: tuple[float, float, float],
+        quat_wxyz: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
         mass_kg: float,
         size_m: tuple[float, float, float],
     ) -> None:
@@ -150,6 +169,7 @@ class Simulation:
         self._drone = RigidPrim(
             "/World/Drone",
             positions=[list(position_m)],
+            orientations=[list(quat_wxyz)],
             masses=[mass_kg],
             reset_xform_op_properties=True,
         )
@@ -244,13 +264,16 @@ class Simulation:
         self._app.update()
         self.play()
 
-    def enable_ros(self) -> None:
+    def enable_ros(self, *, image_every: int = 1) -> None:
         """Publish over ROS 2 from now on: `/clock` after every step, and the
-        camera's image and info once it has one. See `isaacdrones.sim.ros`.
+        camera's image and info on every `image_every`th step once it has
+        one. See `isaacdrones.sim.ros`.
         """
         from isaacdrones.sim.ros import RosPublisher
 
         self._ros = RosPublisher()
+        self._image_every = image_every
+        self._steps = 0
         if self._drone is not None and self._camera is not None:
             self._ros.publish_camera_mount(DRONE_CAMERA_M)
 
@@ -271,7 +294,8 @@ class Simulation:
         if self._drone is not None:
             position_m, quat_wxyz, _, _ = self.drone_state()
             self._ros.publish_true_pose(now, position_m, quat_wxyz)
-        if self._camera is not None:
+        self._steps += 1
+        if self._camera is not None and self._steps % self._image_every == 0:
             rgb = self.camera_rgb()
             if rgb is not None:
                 self._ros.publish_image(now, rgb, self.camera_focal_px)

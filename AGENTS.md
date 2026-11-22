@@ -42,8 +42,10 @@ The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
 - The repository holds a boot, a fixed-rate loop, an RTX camera, a cube scene
   and `--ros`, which publishes the clock and camera over ROS 2 from `rclpy`
   (`src/isaacdrones/sim/ros.py`). `--scene drone` flies a rigid-body drone at
-  the cube with a camera on its nose, and `--ros` then also publishes
-  `/truth/pose` and `/tf_static`. `src/isaacdrones/flight.py` holds the
+  the cube with a camera on its nose, and `--scene warehouse` flies it through
+  NVIDIA's warehouse. With a drone, `--ros` also publishes `/truth/pose` and
+  `/tf_static`. A scene is a function in `app.py` that builds its world and
+  gives the drone a `flight.Flight`. `src/isaacdrones/flight.py` holds the
   controller and the flight; it exists to give the sensors a flight to record
   and is not a flight controller under study. The direction is to find out how realistic a
   camera feed Isaac Sim can give a drone, in a detailed scene. ROS 2 is the
