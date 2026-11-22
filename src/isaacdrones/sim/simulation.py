@@ -145,7 +145,12 @@ class Simulation:
         stage_utils.define_prim("/World/Drone", "Xform")
         Cube("/World/Drone/Body", sizes=1.0, scales=[list(size_m)], colors="blue")
         GeomPrim("/World/Drone/Body", apply_collision_apis=True)
-        self._drone = RigidPrim("/World/Drone", positions=[list(position_m)], masses=[mass_kg])
+        self._drone = RigidPrim(
+            "/World/Drone",
+            positions=[list(position_m)],
+            masses=[mass_kg],
+            reset_xform_op_properties=True,
+        )
 
     def drone_state(self):
         """The drone's true state from physics: `(position_m, quat_wxyz,
@@ -193,17 +198,20 @@ class Simulation:
             # looking along x with z up in the image.
             position_m, quat_wxyz = (0.2, 0.0, 0.0), (0.5, 0.5, -0.5, -0.5)
         camera = RtxCamera(path, translations=[list(position_m)], orientations=[list(quat_wxyz)])
+        from pxr import UsdGeom
+
+        prim = UsdGeom.Camera(stage_utils.get_current_stage().GetPrimAtPath(path))
         if on_drone:
             # A drone passes close to objects, and Isaac Sim's default near
             # clip of 1 m would cut them out of the image.
             camera.camera.set_clipping_ranges(0.01, 1000.0)
+            # A 90 degree horizontal field of view, wide as a drone's camera
+            # is: the focal length is half the aperture.
+            prim.GetFocalLengthAttr().Set(prim.GetHorizontalApertureAttr().Get() / 2.0)
         self._camera = CameraSensor(camera, resolution=resolution_hw, annotators=["rgb"])
-
-        from pxr import UsdGeom
 
         # Both lengths are in the same unit, so their ratio is the focal
         # length in image widths. Pixels are square.
-        prim = UsdGeom.Camera(stage_utils.get_current_stage().GetPrimAtPath(path))
         focal, aperture = prim.GetFocalLengthAttr().Get(), prim.GetHorizontalApertureAttr().Get()
         self.camera_focal_px = resolution_hw[1] * focal / aperture
 

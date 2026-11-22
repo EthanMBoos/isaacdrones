@@ -67,6 +67,7 @@ def wrench(
     state: State,
     target_m: Vec,
     target_velocity_mps: Vec = (0.0, 0.0, 0.0),
+    target_accel_mps2: Vec = (0.0, 0.0, 0.0),
     *,
     position_gain: float = 4.0,
     velocity_gain: float = 3.0,
@@ -75,13 +76,14 @@ def wrench(
 ) -> tuple[float, Vec]:
     """Thrust along body z in newtons, and torque in the body frame in N m.
 
-    The position error sets an acceleration. The drone can only push along
-    its z axis, so the thrust is the part of that acceleration along z, and
-    the torque turns z toward the rest. The nose is kept pointing along
-    world x.
+    The target's acceleration and the position error set an acceleration.
+    The drone can only push along its z axis, so the thrust is the part of
+    that acceleration along z, and the torque turns z toward the rest. The
+    nose is kept pointing along world x.
     """
     accel = tuple(
-        position_gain * (target_m[i] - state.position_m[i])
+        target_accel_mps2[i]
+        + position_gain * (target_m[i] - state.position_m[i])
         + velocity_gain * (target_velocity_mps[i] - state.velocity_mps[i])
         for i in range(3)
     )
@@ -113,19 +115,34 @@ def wrench(
     return thrust_n, torque_nm
 
 
-# The flight: hover, then fly at the cube and stop just short of it.
-START_M: Vec = (-6.0, 0.0, 1.5)
+# The flight: hover, then fly at the 1 m cube at the origin and stop with the
+# camera 0.3 m from its face, below its top. The speed ramps up and down,
+# because a target that stops dead makes the drone overshoot into the cube.
+START_M: Vec = (-6.0, 0.0, 0.8)
+STOP_X_M = -1.0
 HOVER_S = 1.0
 SPEED_MPS = 1.0
-STOP_X_M = -1.0
+ACCEL_MPS2 = 0.5
+_RAMP_S = SPEED_MPS / ACCEL_MPS2
+_CRUISE_S = (STOP_X_M - START_M[0]) / SPEED_MPS - _RAMP_S
+FLIGHT_S = HOVER_S + 2 * _RAMP_S + _CRUISE_S
 
 
-def target(time_s: float) -> tuple[Vec, Vec]:
-    """Target position and velocity `time_s` after the flight starts. Before
-    it starts, at negative times, the target is the start.
+def target(time_s: float) -> tuple[Vec, Vec, Vec]:
+    """Target position, velocity and acceleration `time_s` after the flight
+    starts. Before it starts, at negative times, the target is the start.
     """
-    x = START_M[0] + SPEED_MPS * max(0.0, time_s - HOVER_S)
-    if x >= STOP_X_M:
-        return (STOP_X_M, START_M[1], START_M[2]), (0.0, 0.0, 0.0)
-    moving = SPEED_MPS if time_s > HOVER_S else 0.0
-    return (x, START_M[1], START_M[2]), (moving, 0.0, 0.0)
+    t = min(max(0.0, time_s - HOVER_S), 2 * _RAMP_S + _CRUISE_S)
+    left = 2 * _RAMP_S + _CRUISE_S - t
+    if t <= 0.0 or left <= 0.0:
+        speed, accel = 0.0, 0.0
+        distance = 0.0 if t <= 0.0 else STOP_X_M - START_M[0]
+    elif t < _RAMP_S:
+        speed, accel, distance = ACCEL_MPS2 * t, ACCEL_MPS2, 0.5 * ACCEL_MPS2 * t * t
+    elif left > _RAMP_S:
+        speed, accel, distance = SPEED_MPS, 0.0, SPEED_MPS * (t - 0.5 * _RAMP_S)
+    else:
+        speed, accel = ACCEL_MPS2 * left, -ACCEL_MPS2
+        distance = (STOP_X_M - START_M[0]) - 0.5 * ACCEL_MPS2 * left * left
+    position = (START_M[0] + distance, START_M[1], START_M[2])
+    return position, (speed, 0.0, 0.0), (accel, 0.0, 0.0)

@@ -38,10 +38,8 @@ def _add_drone(sim) -> None:
 
     def fly() -> None:
         elapsed = -1.0 if started_at[0] is None else sim.time - started_at[0]
-        goal, velocity = flight.target(elapsed)
-        sim.apply_drone_wrench(
-            *flight.wrench(drone, flight.State(*sim.drone_state()), goal, velocity)
-        )
+        state = flight.State(*sim.drone_state())
+        sim.apply_drone_wrench(*flight.wrench(drone, state, *flight.target(elapsed)))
 
     def start_flight() -> None:
         started_at[0] = sim.time

@@ -128,8 +128,8 @@ def test_drone_flies_to_the_cube():
     pytest.importorskip("isaacsim")
     from isaacdrones import flight
 
-    # Long enough to hover, cross to the stopping point and settle there.
-    seconds = flight.HOVER_S + (flight.STOP_X_M - flight.START_M[0]) / flight.SPEED_MPS + 3.0
+    # Long enough to finish the flight and settle.
+    seconds = flight.FLIGHT_S + 3.0
     result = subprocess.run(
         [
             sys.executable,
@@ -237,23 +237,25 @@ def test_cube_pose_falls_and_lands():
     assert abs(sum(q * q for q in end[3:]) - 1.0) < 1e-3
 
 
-def test_controller_flies_a_rigid_body_to_its_target():
-    # A rigid body integrated here, without Isaac Sim, at the simulator's rate.
+def _fly(seconds, start, goal_at):
+    """Integrate a rigid body under the controller, without Isaac Sim, at the
+    simulator's rate. `goal_at(t)` gives the arguments of `wrench` after the state.
+    Returns the positions, and the final velocity and quaternion.
+    """
     from isaacdrones.flight import GRAVITY_MPS2, Drone, State, rotation, wrench
 
     drone, dt = Drone(), 1.0 / 60.0
-    position, velocity = [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]
+    position, velocity = list(start), [0.0, 0.0, 0.0]
     quat, rate = [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0]  # rate is in the body frame
-    goal = (2.0, -1.0, 2.0)
-    for _ in range(600):
+    inertia = drone.inertia_kgm2
+    path = []
+    for step in range(round(seconds / dt)):
         r = rotation(quat)
         world_rate = tuple(sum(r[i][k] * rate[k] for k in range(3)) for i in range(3))
-        thrust, torque = wrench(
-            drone, State(tuple(position), tuple(quat), tuple(velocity), world_rate), goal
-        )
+        state = State(tuple(position), tuple(quat), tuple(velocity), world_rate)
+        thrust, torque = wrench(drone, state, *goal_at(step * dt))
         accel = [thrust / drone.mass_kg * r[i][2] for i in range(3)]
         accel[2] -= GRAVITY_MPS2
-        inertia = drone.inertia_kgm2
         gyro = (
             (inertia[1] - inertia[2]) * rate[1] * rate[2],
             (inertia[2] - inertia[0]) * rate[2] * rate[0],
@@ -273,7 +275,24 @@ def test_controller_flies_a_rigid_body_to_its_target():
         ]
         norm = sum(c * c for c in quat) ** 0.5
         quat = [c / norm for c in quat]
-    assert max(abs(position[i] - goal[i]) for i in range(3)) < 0.02
+        path.append(tuple(position))
+    return path, velocity, quat
+
+
+def test_controller_flies_a_rigid_body_to_its_target():
+    goal = (2.0, -1.0, 2.0)
+    path, velocity, quat = _fly(10.0, (0.0, 0.0, 1.0), lambda t: (goal,))
+    assert max(abs(path[-1][i] - goal[i]) for i in range(3)) < 0.02
     assert max(abs(v) for v in velocity) < 0.02
     # Level, with the nose along world x.
     assert abs(quat[0]) > 0.999
+
+
+def test_flight_stops_short_of_the_cube():
+    from isaacdrones import flight
+
+    path, velocity, _ = _fly(flight.FLIGHT_S + 3.0, flight.START_M, flight.target)
+    assert abs(path[-1][0] - flight.STOP_X_M) < 0.02 and max(abs(v) for v in velocity) < 0.02
+    # The camera is 0.2 m ahead of center and the cube's face is at -0.5 m.
+    assert max(x for x, _, _ in path) + 0.2 < -0.5 - 0.2
+    assert max(abs(z - flight.START_M[2]) for _, _, z in path) < 0.05
