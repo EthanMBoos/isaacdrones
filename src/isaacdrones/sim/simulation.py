@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 
 KIT = Path(__file__).with_name("isaacdrones.kit")
+# Where the drone's camera sits in the drone's frame.
+DRONE_CAMERA_M = (0.2, 0.0, 0.0)
 
 
 class Simulation:
@@ -80,6 +82,7 @@ class Simulation:
         self._ros = None
         self._camera = None
         self._drone = None
+        self._imu = None
         # Called at the start of every step, before physics. The drone's
         # thrust and torque are applied here.
         self.before_step = None
@@ -164,6 +167,25 @@ class Simulation:
             for array in (positions, orientations, linear, angular)
         )
 
+    def add_imu(self) -> None:
+        """Add an IMU at the drone's center, with the drone's axes."""
+        from isaacsim.sensors.experimental.physics import IMU, IMUSensor
+
+        self._imu = IMUSensor(IMU.create("/World/Drone/Imu", translations=[[0.0, 0.0, 0.0]]))
+
+    def imu_reading(self):
+        """The IMU's latest reading, from the last physics step:
+        `(specific_force_mps2, angular_velocity_radps)` in the drone's frame,
+        each a tuple of floats. Specific force is what an accelerometer
+        measures: +g along z at rest, and zero in free fall. Isaac Sim adds
+        no noise or bias.
+        """
+        data = self._imu.get_data()
+        return tuple(
+            tuple(float(c) for c in data[key])
+            for key in ("linear_acceleration", "angular_velocity")
+        )
+
     def apply_drone_wrench(self, thrust_n: float, torque_nm: tuple[float, float, float]) -> None:
         """Push the drone along its own z axis and turn it, both in its body
         frame, for the next physics step only.
@@ -196,7 +218,7 @@ class Simulation:
             path = "/World/Drone/Camera"
             # In the drone's frame: 0.2 m ahead of center, clear of the box,
             # looking along x with z up in the image.
-            position_m, quat_wxyz = (0.2, 0.0, 0.0), (0.5, 0.5, -0.5, -0.5)
+            position_m, quat_wxyz = DRONE_CAMERA_M, (0.5, 0.5, -0.5, -0.5)
         camera = RtxCamera(path, translations=[list(position_m)], orientations=[list(quat_wxyz)])
         from pxr import UsdGeom
 
@@ -249,11 +271,13 @@ class Simulation:
         from isaacdrones.sim.ros import RosPublisher
 
         self._ros = RosPublisher()
+        if self._drone is not None and self._camera is not None:
+            self._ros.publish_camera_mount(DRONE_CAMERA_M)
 
     @property
-    def ros_counts(self) -> tuple[int, int]:
-        """Messages published so far: `(clock, image)`."""
-        return self._ros.clock_count, self._ros.image_count
+    def ros_counts(self) -> tuple[int, int, int]:
+        """Messages published so far: `(clock, image, imu)`."""
+        return self._ros.clock_count, self._ros.image_count, self._ros.imu_count
 
     def step(self) -> None:
         """Run one Kit frame, then publish it if ROS 2 is enabled."""
@@ -264,6 +288,11 @@ class Simulation:
             return
         now = self.time
         self._ros.publish_clock(now)
+        if self._imu is not None:
+            self._ros.publish_imu(now, *self.imu_reading())
+        if self._drone is not None:
+            position_m, quat_wxyz, _, _ = self.drone_state()
+            self._ros.publish_true_pose(now, position_m, quat_wxyz)
         if self._camera is not None:
             rgb = self.camera_rgb()
             if rgb is not None:

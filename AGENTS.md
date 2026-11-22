@@ -42,7 +42,8 @@ The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
 - The repository holds a boot, a fixed-rate loop, an RTX camera, a cube scene
   and `--ros`, which publishes the clock and camera over ROS 2 from `rclpy`
   (`src/isaacdrones/sim/ros.py`). `--scene drone` flies a rigid-body drone at
-  the cube with the camera on its nose. `src/isaacdrones/flight.py` holds the
+  the cube with a camera on its nose and an IMU at its center, and `--ros`
+  then also publishes `/imu`, `/truth/pose` and `/tf_static`. `src/isaacdrones/flight.py` holds the
   controller and the flight; it exists to give the sensors a flight to record
   and is not a flight controller under study. The direction is to find out how good the
   simulated sensors are for developing a real drone's software. ROS 2 is the

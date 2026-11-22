@@ -30,8 +30,15 @@ def library_path() -> Path | None:
 
 
 class RosPublisher:
-    """Publishes `/clock`, and `/camera/image_raw` with `/camera/camera_info`
-    when given images. Create it after `SimulationApp` has started.
+    """Publishes `/clock`, and each of these when given the data:
+    `/camera/image_raw` with `/camera/camera_info`, `/imu`, `/truth/pose`, and
+    on `/tf_static` the transform from the drone to its camera. Create it
+    after `SimulationApp` has started.
+
+    The frames are `world`, `base_link` (the drone: x forward, y left, z up)
+    and `camera_optical` (z forward, x right, y down). `/truth/pose` is the
+    drone's true pose from physics. It is there to score an estimator
+    against, and an estimator must not subscribe to it.
     """
 
     def __init__(self) -> None:
@@ -44,8 +51,11 @@ class RosPublisher:
             raise RuntimeError(
                 f"The ROS 2 bridge did not load. Start with {library_path()} on LD_LIBRARY_PATH."
             ) from error
+        from geometry_msgs.msg import PoseStamped, TransformStamped
+        from rclpy.qos import DurabilityPolicy, QoSProfile
         from rosgraph_msgs.msg import Clock
-        from sensor_msgs.msg import CameraInfo, Image
+        from sensor_msgs.msg import CameraInfo, Image, Imu
+        from tf2_msgs.msg import TFMessage
 
         self._rclpy = rclpy
         if not rclpy.ok():
@@ -54,9 +64,17 @@ class RosPublisher:
         self._clock = self._node.create_publisher(Clock, "/clock", 10)
         self._image = self._node.create_publisher(Image, "/camera/image_raw", 10)
         self._info = self._node.create_publisher(CameraInfo, "/camera/camera_info", 10)
+        self._imu = self._node.create_publisher(Imu, "/imu", 100)
+        self._pose = self._node.create_publisher(PoseStamped, "/truth/pose", 100)
+        # Latched, as static transforms are: a late subscriber still gets it.
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._tf_static = self._node.create_publisher(TFMessage, "/tf_static", latched)
         self._Clock, self._Image, self._CameraInfo = Clock, Image, CameraInfo
+        self._Imu, self._PoseStamped = Imu, PoseStamped
+        self._TransformStamped, self._TFMessage = TransformStamped, TFMessage
         self.clock_count = 0
         self.image_count = 0
+        self.imu_count = 0
 
     def _stamp(self, time_s: float):
         from builtin_interfaces.msg import Time
@@ -96,6 +114,40 @@ class RosPublisher:
         info.p = [focal_px, 0.0, cx, 0.0, 0.0, focal_px, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
         self._info.publish(info)
         self.image_count += 1
+
+    def publish_imu(self, time_s: float, specific_force_mps2, angular_velocity_radps) -> None:
+        imu = self._Imu()
+        imu.header.stamp = self._stamp(time_s)
+        imu.header.frame_id = "base_link"
+        acc, gyro = imu.linear_acceleration, imu.angular_velocity
+        acc.x, acc.y, acc.z = specific_force_mps2
+        gyro.x, gyro.y, gyro.z = angular_velocity_radps
+        # An IMU does not measure orientation, and -1 here says so.
+        imu.orientation_covariance[0] = -1.0
+        self._imu.publish(imu)
+        self.imu_count += 1
+
+    def publish_true_pose(self, time_s: float, position_m, quat_wxyz) -> None:
+        pose = self._PoseStamped()
+        pose.header.stamp = self._stamp(time_s)
+        pose.header.frame_id = "world"
+        p, q = pose.pose.position, pose.pose.orientation
+        p.x, p.y, p.z = position_m
+        q.w, q.x, q.y, q.z = quat_wxyz
+        self._pose.publish(pose)
+
+    def publish_camera_mount(self, position_m) -> None:
+        """Publish once where the camera sits on the drone. It looks along
+        the drone's x axis, so its optical frame is the drone's frame turned
+        to put z forward and y down.
+        """
+        mount = self._TransformStamped()
+        mount.header.frame_id = "base_link"
+        mount.child_frame_id = "camera_optical"
+        t, q = mount.transform.translation, mount.transform.rotation
+        t.x, t.y, t.z = position_m
+        q.w, q.x, q.y, q.z = 0.5, -0.5, 0.5, -0.5
+        self._tf_static.publish(self._TFMessage(transforms=[mount]))
 
     def close(self) -> None:
         self._node.destroy_node()

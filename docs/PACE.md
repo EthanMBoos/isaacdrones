@@ -61,15 +61,16 @@ ls ~/scratch/isaacdrones/runs/flight             # an .mcap file and metadata
 ```
 
 `bag NAME` runs `isaacdrones --headless --ros` with the arguments after the
-name, and records `/clock`, `/camera/image_raw` and `/camera/camera_info` to
-`runs/NAME`. The simulator publishes with ROS 2 libraries that Isaac Sim ships,
-but its image has no ROS 2 tools, so the recorder runs in a second container,
-ROS 2 Jazzy, on the same node. The two find each other because containers on a
-node share its network. Each job takes its own `ROS_DOMAIN_ID`, so it does not
-hear other people's nodes. `scripts/pace.sh ros CMD` runs any command in that
-container on a compute node, as in `scripts/pace.sh ros ros2 bag info flight`.
-The 10 s flight at 640 by 480 is a 555 MB bag, and it opens on a laptop in ROS 2
-or Foxglove.
+name, and records to `runs/NAME` the topics it publishes: `/clock`,
+`/camera/image_raw` and `/camera/camera_info`, and with the drone `/imu`,
+`/truth/pose` and `/tf_static`. The simulator publishes with ROS 2 libraries
+that Isaac Sim ships, but its image has no ROS 2 tools, so the recorder runs in
+a second container, ROS 2 Jazzy, on the same node. The two find each other
+because containers on a node share its network. Each job takes its own
+`ROS_DOMAIN_ID`, so it does not hear other people's nodes. `scripts/pace.sh ros
+CMD` runs any command in that container on a compute node, as in
+`scripts/pace.sh ros ros2 bag info flight`. The 10 s flight at 640 by 480 is a
+555 MB bag, and it opens on a laptop in ROS 2 or Foxglove.
 
 `gpu`, `batch`, `bag` and `stream` take a card name before the command: `blackwell`
 (the default), `l40s`, `a40` or `h100`, as in `scripts/pace.sh batch h100 uv

@@ -3,13 +3,14 @@
 isaacdrones is a small base for simulating aerial drones in [NVIDIA Isaac
 Sim](https://docs.isaacsim.omniverse.nvidia.com/latest/) 6.2. It starts Isaac
 Sim in under 10 s, advances physics by a fixed timestep, and flies a drone that
-carries an RTX camera, whose images are published over ROS 2. The drone is a
-rigid body moved by a thrust and a torque, with no rotors.
+carries an RTX camera and an IMU, whose data is published over ROS 2. The drone
+is a rigid body moved by a thrust and a torque, with no rotors.
 
 The goal is to find out how good Isaac Sim's simulated sensors are for
-developing software that will run on a real drone. The next step is an IMU on
-the drone beside the camera. ROS 2 is the only integration: no autopilot or
-flight stack is connected. [docs/TODO.md](docs/TODO.md) has the steps.
+developing software that will run on a real drone. The simulated IMU is exact,
+so the next step is to give it the noise and bias of a real one. ROS 2 is the
+only integration: no autopilot or flight stack is connected.
+[docs/TODO.md](docs/TODO.md) has the steps.
 
 Isaac Sim needs Linux or Windows 11 on x86_64 and an NVIDIA RTX GPU. macOS
 cannot run the simulator, but the package installs there and the tests that
@@ -35,7 +36,7 @@ uv run isaacdrones --headless --steps 100       # no window, 100 frames
 uv run isaacdrones --headless --camera out.png  # one image of the cube
 uv run isaacdrones --headless --ros --scene drone --steps 600
                                                 # a flight at the cube, with the
-                                                # drone's camera over ROS 2
+                                                # camera and IMU over ROS 2
 uv run isaacdrones --help                       # every flag
 ```
 

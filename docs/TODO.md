@@ -6,21 +6,27 @@ integration: no autopilot or flight stack is connected. The steps below are in
 the order they should be taken.
 
 `--scene drone` flies a rigid-body drone at a cube, with a camera on its nose
-whose near clip is 0.01 m. `--ros` publishes the clock and that camera over ROS
-2, and on ICE `scripts/pace.sh bag` records them ([PACE.md](PACE.md)).
+and an IMU at its center. `--ros` publishes the clock, the camera, the IMU, the
+drone's true pose and the transform from the drone to the camera over ROS 2, and
+on ICE `scripts/pace.sh bag` records them ([PACE.md](PACE.md)).
 
-**1. An IMU.** The IMU comes from the `isaacsim.sensors.experimental.physics`
-extension and has not been run here. It reads every physics step and can report
-specific force. Its readings are published as `sensor_msgs/Imu` in the same way
-as the camera, and the bag also carries the drone's true pose and the transform
-from the body to the camera. The true pose is there to score an estimator
-against, and an estimator must not read it.
+The simulated IMU is exact. Over a recorded flight its specific force agrees
+with the second difference of the true position to 0.003 m/s^2, and its angular
+velocity with the difference of the true orientation to 0.0002 rad/s. Its
+readings are in the drone's frame, with +g along z at hover. For the IMU,
+therefore, the simulator supplies the motion and none of the error.
 
-**2. IMU noise.** The documentation describes no noise or bias, so the simulated
-IMU is ideal. A real IMU has white noise and a bias that drifts, and a drone's
-has motor vibration on top. These have to be added to the readings before the
-IMU says anything about a real one. This is the first answer to the question in
-the goal: for the IMU, the simulator supplies the motion and none of the error.
+**1. IMU noise.** A real IMU has white noise and a bias that drifts, and a
+drone's has motor vibration on top. These are added to the readings before they
+are published, with the exact readings kept on a second topic for comparison.
+The noise densities and bias drift come from the datasheet of a real IMU, and
+which one is not decided.
+
+**2. A faster IMU.** The IMU reads once per physics step, and physics steps once
+per frame, so both the IMU and the camera run at 60 Hz. A visual-inertial
+estimator is usually given an IMU several times faster than its camera (e.g.,
+200 Hz against 20 Hz). This needs several physics steps per rendered frame, which changes the loop that
+`Simulation.step` owns.
 
 **3. An estimator on the bag.** Run an open-source estimator on the recorded
 camera and IMU data and compare its output with the true pose. Which estimator
