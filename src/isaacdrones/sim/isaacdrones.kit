@@ -6,8 +6,9 @@
 # dependencies, PhysX and the RTX renderer included. On PACE ICE this boots
 # in under 10 s, against about 150 s for the stock app.
 #
-# To use more of Isaac Sim (ROS 2 bridge, sensors), add the extension under
-# [dependencies].
+# To use more of Isaac Sim, add the extension under [dependencies]. The ROS 2
+# bridge is not listed: --ros enables it at run time, so that runs without it
+# do not load it.
 #
 # The settings come from Isaac Sim 6.2's isaacsim.exp.base.kit and
 # isaacsim.exp.base.python.kit. Recheck them when bumping Isaac Sim.

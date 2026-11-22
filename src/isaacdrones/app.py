@@ -6,6 +6,8 @@ This module does not import Isaac Sim; `isaacdrones.sim` does.
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import time
 import traceback
 
@@ -58,11 +60,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Streaming Client. It starts paused; press Play in the client. IP is the "
         "address the client connects to (default 127.0.0.1).",
     )
+    parser.add_argument(
+        "--ros",
+        action="store_true",
+        help="Add a cube and a camera, and publish /clock, /camera/image_raw and "
+        "/camera/camera_info over ROS 2, stamped with simulation time.",
+    )
     return parser.parse_args(argv)
+
+
+def _restart_with_ros_libraries() -> None:
+    """Isaac Sim's ROS 2 libraries load only if their folder was on
+    LD_LIBRARY_PATH when the process started, so start again with it there.
+    """
+    from isaacdrones.sim.ros import library_path
+
+    path = library_path()
+    current = os.environ.get("LD_LIBRARY_PATH", "")
+    if path is None or str(path) in current.split(":"):
+        return
+    os.environ["LD_LIBRARY_PATH"] = f"{current}:{path}" if current else str(path)
+    os.environ.setdefault("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp")
+    os.execv(sys.executable, [sys.executable, "-m", "isaacdrones.app", *sys.argv[1:]])
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.ros and argv is None:
+        _restart_with_ros_libraries()
 
     from isaacdrones.sim import Simulation
 
@@ -80,14 +105,20 @@ def main(argv: list[str] | None = None) -> None:
 
 def _run(sim, args: argparse.Namespace) -> None:
     sim.add_ground_and_light()
-    scene = args.scene or ("falling-cube" if args.video else "cube" if args.camera else "empty")
+    has_camera = bool(args.video or args.camera or args.ros)
+    scene = args.scene or ("falling-cube" if args.video else "cube" if has_camera else "empty")
     SCENES[scene](sim)
     if args.stream:
         _stream(sim)
         return
-    if args.video or args.camera:
+    if has_camera:
         sim.add_camera()
+    if args.ros:
+        sim.enable_ros()
     sim.play()
+    if args.ros:
+        # Wait for the renderer, so that every counted frame has an image.
+        _wait_for_camera(sim)
     if args.video:
         _save_video(sim, args.video, args.steps or 120)
         return
@@ -108,6 +139,9 @@ def _run(sim, args: argparse.Namespace) -> None:
         f"physics_steps={sim.num_physics_steps} engine={sim.physics_engine}",
         flush=True,
     )
+    if args.ros:
+        clock, images = sim.ros_counts
+        print(f"isaacdrones: ros clock={clock} images={images}", flush=True)
     if args.camera:
         _save_camera_image(sim, args.camera)
 

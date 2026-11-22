@@ -77,6 +77,8 @@ class Simulation:
         # one physics step per frame.
         SimulationManager.setup_simulation(dt=dt)
         RenderingManager.set_dt(dt)
+        self._ros = None
+        self._camera = None
 
     def add_ground_and_light(self) -> None:
         from isaacsim.core.experimental.objects import DistantLight, DomeLight, GroundPlane
@@ -130,12 +132,21 @@ class Simulation:
         world Z up in the image. A USD camera looks down its own -Z with +Y
         up, so that orientation is a quarter turn about X.
         """
+        import isaacsim.core.experimental.utils.stage as stage_utils
         from isaacsim.sensors.experimental.rtx import CameraSensor, RtxCamera
 
         camera = RtxCamera(
             "/World/Camera", translations=[list(position_m)], orientations=[list(quat_wxyz)]
         )
         self._camera = CameraSensor(camera, resolution=resolution_hw, annotators=["rgb"])
+
+        from pxr import UsdGeom
+
+        # Both lengths are in the same unit, so their ratio is the focal
+        # length in image widths. Pixels are square.
+        prim = UsdGeom.Camera(stage_utils.get_current_stage().GetPrimAtPath("/World/Camera"))
+        focal, aperture = prim.GetFocalLengthAttr().Get(), prim.GetHorizontalApertureAttr().Get()
+        self.camera_focal_px = resolution_hw[1] * focal / aperture
 
     def camera_rgb(self):
         """Latest camera image: NumPy uint8 of shape (height, width, 3). None
@@ -164,9 +175,30 @@ class Simulation:
         self._app.update()
         self.play()
 
+    def enable_ros(self) -> None:
+        """Publish over ROS 2 from now on: `/clock` after every step, and the
+        camera's image and info once it has one. See `isaacdrones.sim.ros`.
+        """
+        from isaacdrones.sim.ros import RosPublisher
+
+        self._ros = RosPublisher()
+
+    @property
+    def ros_counts(self) -> tuple[int, int]:
+        """Messages published so far: `(clock, image)`."""
+        return self._ros.clock_count, self._ros.image_count
+
     def step(self) -> None:
-        """Run one Kit frame."""
+        """Run one Kit frame, then publish it if ROS 2 is enabled."""
         self._app.update()
+        if self._ros is None:
+            return
+        now = self.time
+        self._ros.publish_clock(now)
+        if self._camera is not None:
+            rgb = self.camera_rgb()
+            if rgb is not None:
+                self._ros.publish_image(now, rgb, self.camera_focal_px)
 
     def is_running(self) -> bool:
         # is_exiting covers File > Exit in a streamed GUI.
@@ -197,4 +229,6 @@ class Simulation:
 
     def close(self, exit_code: int = 0) -> None:
         """Shut down Isaac Sim. This exits the process, so call it last."""
+        if self._ros is not None:
+            self._ros.close()
         self._app.close(exit_code=exit_code)

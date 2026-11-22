@@ -28,6 +28,7 @@ def test_parse_args():
     assert parse_args(["--scene", "falling-cube"]).scene == "falling-cube"
     assert parse_args(["--stream"]).stream == "127.0.0.1"
     assert parse_args(["--stream", "10.0.0.5"]).stream == "10.0.0.5"
+    assert parse_args(["--ros"]).ros and not args.ros
 
 
 def test_isaac_sim_only_imported_in_sim_package():
@@ -102,6 +103,24 @@ def test_camera_renders(tmp_path):
     assert png.stat().st_size > 0
     # An orange cube on a ground plane is not a flat image.
     assert float(match[4]) > 5.0
+
+
+@pytest.mark.sim
+def test_ros_publishes_clock_and_camera():
+    pytest.importorskip("isaacsim")
+    steps = 20
+    result = subprocess.run(
+        [sys.executable, "-m", "isaacdrones.app", "--headless", "--ros", "--steps", str(steps)],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    match = re.search(r"isaacdrones: ros clock=(\d+) images=(\d+)", result.stdout)
+    assert match, result.stdout[-3000:]
+    print(match[0])
+    # Publishing starts before the renderer has an image, so the clock leads.
+    assert int(match[1]) >= int(match[2]) >= steps
 
 
 RESET_SCRIPT = """

@@ -7,6 +7,8 @@
 #   scripts/pace.sh batch [CARD] CMD... queue CMD on a GPU node; log in scratch
 #   scripts/pace.sh run CMD...          run CMD inside the container, on this node
 #   scripts/pace.sh shell               shell inside the container, on this node
+#   scripts/pace.sh ros CMD...          run CMD in a ROS 2 Jazzy container, on this node
+#   scripts/pace.sh bag [CARD] NAME [ARGS]  queue isaacdrones --ros, recorded to runs/NAME
 #   scripts/pace.sh cards               the card types and what is free right now
 #   scripts/pace.sh stream [CARD] [ARGS] isaacdrones in the GUI, streamed to your computer
 #   scripts/pace.sh space               quota, and the size of data and runs
@@ -56,6 +58,7 @@ make_dirs() {
     ROOT="$(cd "$ROOT" && pwd -P)"
     IMAGE="$ROOT/images/isaac-sim-6.2.0.sif"
     mkdir -p "$ROOT"/{images,apptainer-cache,apptainer-tmp,uv/bin,uv/cache,uv/python,home,logs,data,runs}
+    ROS_IMAGE="$ROOT/images/ros-jazzy.sif"
     export APPTAINER_CACHEDIR="$ROOT/apptainer-cache"
     export APPTAINER_TMPDIR="${TMPDIR:-$ROOT/apptainer-tmp}"
 }
@@ -92,6 +95,8 @@ in_container() {
     # that cannot start here, costing ten seconds of retries per launch, so
     # it is off. To enable: OMNICLIENT_HUB_MODE=shared scripts/pace.sh run ...
     export APPTAINERENV_OMNICLIENT_HUB_MODE="${OMNICLIENT_HUB_MODE:-disabled}"
+    # ROS 2 nodes find each other only within one domain.
+    export APPTAINERENV_ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 
     apptainer exec $nv --cleanenv \
         --home "$ROOT/home:/home/isaacdrones" \
@@ -100,6 +105,41 @@ in_container() {
         --bind "$REPO:/workspace/isaacdrones" \
         --pwd /workspace/isaacdrones \
         "$IMAGE" "$@"
+}
+
+# Run a command in a ROS 2 Jazzy container. Isaac Sim's image has the ROS 2
+# libraries that the simulator publishes with but none of the tools, so
+# ros2 topic and ros2 bag come from here. Containers on one node share its
+# network, so this one hears the simulator.
+in_ros() {
+    make_dirs
+    if [ ! -f "$ROS_IMAGE" ]; then
+        apptainer pull "$ROS_IMAGE" docker://ros:jazzy-ros-base
+    fi
+    apptainer exec --cleanenv --env "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}" \
+        --bind "$ROOT" --bind "$ROOT:$ROOT_TYPED" --pwd "$ROOT/runs" \
+        "$ROS_IMAGE" bash -c 'source /opt/ros/jazzy/setup.bash && "$@"' ros "$@"
+}
+
+# Record one run of isaacdrones --ros to a bag. The recorder starts first and
+# is stopped when the simulator exits.
+record_bag() {
+    local name="$1"
+    shift
+    make_dirs
+    local bag="$ROOT/runs/$name"
+    [ ! -e "$bag" ] || { echo "$bag exists. Choose another name or delete it." >&2; exit 1; }
+    # Other people's nodes on the cluster use domain 0.
+    export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-$((${SLURM_JOB_ID:-$$} % 100 + 1))}"
+    in_ros ros2 bag record --output "$bag" /clock /camera/image_raw /camera/camera_info &
+    local recorder=$!
+    local status=0
+    in_container uv run isaacdrones --headless --ros "$@" || status=$?
+    sleep 2 # let the last messages arrive
+    pkill -INT -P "$recorder" -f "ros2 bag record" || pkill -INT -f "ros2 bag record" || true
+    wait "$recorder" || true
+    in_ros ros2 bag info "$bag"
+    return "$status"
 }
 
 setup() {
@@ -207,6 +247,34 @@ stream)
     echo
     echo "and follow what it says. When you are done, stop the job: scancel $job"
     ;;
+ros)
+    shift
+    in_ros "$@"
+    ;;
+bag)
+    shift
+    card=blackwell
+    if [ $# -gt 0 ] && is_card "$1"; then
+        card="$1"
+        shift
+    fi
+    [ $# -gt 0 ] || { echo "Usage: scripts/pace.sh bag [CARD] NAME [ARGS]" >&2; exit 1; }
+    card_request "$card"
+    make_dirs
+    job="$(sbatch --parsable --job-name="isaacdrones-bag" --gres=gpu:1 \
+        --partition="$PARTITION" --constraint="$FEATURE" \
+        ${EXCLUDE:+--exclude="$EXCLUDE"} --cpus-per-task=8 --mem=64G --time=01:00:00 \
+        --chdir="$REPO" --output="$ROOT/logs/%j.log" \
+        --wrap="scripts/pace.sh record-bag $(printf '%q ' "$@")")"
+    job="${job%%;*}"
+    echo "Submitted job $job on $card. The bag goes to $ROOT/runs/$1"
+    echo "tail -n +1 -f $ROOT/logs/$job.log"
+    ;;
+record-bag)
+    # Runs inside the job that bag submits.
+    shift
+    record_bag "$@"
+    ;;
 cards)
     # Node counts by state, from Slurm. An idle or mixed node may have a free
     # card; an allocated node has none.
@@ -248,7 +316,7 @@ shell)
     in_container bash
     ;;
 *)
-    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

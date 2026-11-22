@@ -39,8 +39,9 @@ himself. Use American spelling.
 
 The reasoning is in `docs/reference/ISAAC_SIM_NOTES.md`.
 
-- The repository holds a boot, a fixed-rate loop, an RTX camera and a cube
-  scene. No drone is modeled yet. The direction is to find out how good the
+- The repository holds a boot, a fixed-rate loop, an RTX camera, a cube scene
+  and `--ros`, which publishes the clock and camera over ROS 2 from `rclpy`
+  (`src/isaacdrones/sim/ros.py`). No drone is modeled yet. The direction is to find out how good the
   simulated sensors are for developing a real drone's software. ROS 2 is the
   only integration; no autopilot or flight stack is connected. `docs/TODO.md`
   has the steps.
