@@ -1,8 +1,7 @@
 # To do
 
 The goal is to find out how realistic a camera feed Isaac Sim can give a drone.
-ROS 2 is the only integration: no autopilot or flight stack is connected. The
-steps below are in the order they should be taken.
+ROS 2 is the only integration: no autopilot or flight stack is connected.
 
 `--scene drone` flies a rigid-body drone at a cube, `--scene warehouse` flies it
 through NVIDIA's warehouse, and `--scene campus` flies it over the Georgia Tech
@@ -21,23 +20,35 @@ mapped. A flight down an aisle needs them.
 Over the campus, buildings, trees and roads are recognizable from 150 m, and the
 detail softens toward the ground.
 
-**1. Google's terms.** Read what Google allows to be done with the tiles before
-anyone records data from them or trains on it, and show Google's credit with the
-imagery, which the recordings do not yet do.
+Camera:
 
-**2. Other places and other views.** The campus, the flight and the camera's 45
-degree tilt are fixed in the code. A place given by latitude and longitude, and
-a camera that looks straight down, are the obvious options to add.
+- lens distortion, checked by calibrating on a checkerboard in the scene;
+- noise, exposure and motion blur;
+- depth and a point cloud;
+- a place by latitude and longitude, a camera that looks straight down, a sky;
+- RTX Minimal against the default and higher sample counts: look and cost.
 
-**3. Renderers.** Compare Isaac Sim's default renderer with its path-tracing
-mode on the same warehouse frames, for how they look and what they cost.
+Other sensors:
 
-`--video` and `--stream` have not run since the camera code last changed. RTX
-lidar and radar are untried.
+- an IMU, which needs a useful rate from 60 Hz physics;
+- RTX lidar and radar, both untried;
+- an altimeter and a position fix, from the true pose plus noise.
+
+In ROS 2:
+
+- fly the drone from velocity commands;
+- detect AprilTags in the warehouse;
+- visual odometry against the true path;
+- an estimator on the camera, IMU and altimeter.
+
+Open:
+
+- Google's terms bar storing or analyzing the tiles. Decide how the campus
+  scene may be used, and show Google's credit;
+- `--video` and `--stream` have not run since the camera code last changed.
 
 Later, each when something needs it:
 
-- lens distortion and sensor noise from Isaac Sim's camera pipeline;
 - a measure of how realistic the feed is, possibly against the real flights in
   splatsim;
 - a rotor model, and collisions between the drone and the scene: the cube has
