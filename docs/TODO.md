@@ -22,15 +22,12 @@ are published, with the exact readings kept on a second topic for comparison.
 The noise densities and bias drift come from the datasheet of a real IMU, and
 which one is not decided.
 
-**2. A faster IMU.** The IMU reads once per physics step, and physics steps once
-per frame, so both the IMU and the camera run at 60 Hz. A visual-inertial
-estimator is usually given an IMU several times faster than its camera (e.g.,
-200 Hz against 20 Hz). This needs several physics steps per rendered frame, which changes the loop that
-`Simulation.step` owns.
-
-**3. An estimator on the bag.** Run an open-source estimator on the recorded
+**2. An estimator on the bag.** Run an open-source estimator on the recorded
 camera and IMU data and compare its output with the true pose. Which estimator
-is not decided.
+is not decided. The IMU and the camera both run at 60 Hz, one reading per
+physics step, and that rate is taken as given. A visual-inertial estimator is
+usually given an IMU several times faster than its camera, so whether one works
+at equal rates is part of what this step finds out.
 
 The recorder keeps every message at 640 by 480 with the simulator running
 unpaced. A larger image or a second camera may not keep up, and that has not
