@@ -4,8 +4,8 @@ Findings from reading the source of 34 repos built on Isaac Sim, and the Isaac
 Sim 6.0 to 6.2 and Isaac Lab 3.0 release and migration notes. The baseline is
 Isaac Sim 6.2.0 and Isaac Lab 3.0.0, both released in October 2026.
 
-Two limits apply. Nothing here was run, so no performance claim is our own
-measurement. The release-note details came through a summarising web reader, so
+Two limits apply. Nothing here was run, so no performance claim is a
+measurement made here. The release-note details came through a summarizing web reader, so
 check exact identifiers against the official pages. Everything else was read
 directly in code or in-repo docs.
 

@@ -23,19 +23,19 @@ while simulation_app.is_running():
 
 `simulation_app.update()` runs one whole Kit frame: physics, OmniGraph,
 sensors and rendering. Isaac Sim's ROS 2 examples loop the same way. The
-physics timestep and the frame timestep are separate settings, and we set
-both to the same value, which gives one physics step per frame.
+physics timestep and the frame timestep are separate settings, and both
+are set to the same value, which gives one physics step per frame.
 
 The other calls relate to it as follows, according to Isaac Sim's source.
 `SimulationManager.step()` steps physics only, and `RenderingManager.render()`
 is a Kit frame with physics switched off. Calling `step()` in a loop that also
-calls `update()` therefore steps physics twice. If we later need physics
+calls `update()` therefore steps physics twice. If physics is later needed
 faster than the frame rate, `Simulation.step()` becomes several `step()` calls
 followed by one `render()`. Genie Sim measured a Kit frame at about 2 ms with
 the viewport frozen and about 33 ms with it live, which is why fast projects
 do this.
 
-Four behaviours of the loop were found by running it on ICE.
+Four behaviors of the loop were found by running it on ICE.
 
 - `SimulationApp.close()` exits the process, with status 0 unless told
   otherwise. Nothing runs after it, so a test that boots the simulator does so
@@ -52,25 +52,25 @@ Four behaviours of the loop were found by running it on ICE.
 ## Decisions
 
 **Isaac Sim, not Isaac Lab.** isaacdrones builds directly on Isaac Sim 6.2.
-Owning the simulation loop keeps open what we expect to want: the ROS 2
+Owning the simulation loop keeps open what is likely to be wanted: the ROS 2
 bridge, RTX lidar and radar, tools inside the Isaac Sim GUI, direct access to
 engine data, and pacing against an external process such as a flight stack.
 Under Lab each of these works against Lab's ownership of the stage and of
 stepping.
 
-The price is everything Lab provides, which we must write if we come to need
-it: parallel environments with their cloning, layout and resets; batched
+The price is everything Lab provides, which must be written here if it is
+needed: parallel environments with their cloning, layout and resets; batched
 asset classes with cached state; sensor wrappers and tiled cameras; actuator
-models, controllers, terrain generation and randomisation; the choice of
-physics engine or renderer by preset; the RL environment structure; and the
-config, benchmark and launch tooling. We also lose Lab's buffer against API
-change. We build on `isaacsim.core.experimental`, which still changes between
-releases, and absorb those changes ourselves. If parallel training becomes
-the main use, the likely route is to add Lab as a second backend and not to
-rebuild it.
+models, controllers, terrain generation and randomisation; the choice of physics
+engine or renderer by preset; the RL environment structure; and the config,
+benchmark and launch tooling. Lab's buffer against API change is also lost. The
+code builds on `isaacsim.core.experimental`, which still changes between
+releases, and those changes are absorbed here. If parallel training becomes the
+main use, the likely route is to add Lab as a second backend and not to rebuild
+it.
 
 **One lifecycle class and one importing package.** The question was how much
-of an interface to put between our logic and the engine. The projects
+of an interface to put between the logic and the engine. The projects
 surveyed answer it in five ways, checked against their code between 9 and 14
 November 2026:
 
@@ -82,17 +82,16 @@ November 2026:
 | Per-object factory | Isaac Lab | Every asset and sensor class has a per-engine version. | a package per engine |
 | Retrofitted facade | OmniGibson | About 100 methods mirroring PhysX and USD, added late. | high, and most engine code bypasses it |
 
-An interface does not keep a project current: OmniLRS has none and is up to
-date on 6.2, while OmniGibson's is mostly nominal. An interface is also cheap
-to add later, and one designed with a single engine behind it tends to mirror
-that engine. Two things are expensive to retrofit: Isaac Sim imports spread
-through every file, and the types that cross the boundary (array type,
-quaternion order, whether state is shaped per environment). We therefore fix
-those two and nothing else. One class owns the lifecycle, and only one
-package imports Isaac Sim. A larger interface waits for a second engine or
-for a mode without Kit, in which an engine such as Newton runs as a plain
-Python library; that starts faster but has no GUI, ROS 2 bridge or Isaac Sim
-sensors.
+An interface does not keep a project current: OmniLRS has none and is up to date
+on 6.2, while OmniGibson's is mostly nominal. An interface is also cheap to add
+later, and one designed with a single engine behind it tends to mirror that
+engine. Two things are expensive to retrofit: Isaac Sim imports spread through
+every file, and the types that cross the boundary (array type, quaternion order,
+whether state is shaped per environment). Those two are therefore fixed and
+nothing else. One class owns the lifecycle, and only one package imports Isaac
+Sim. A larger interface waits for a second engine or for a mode without Kit, in
+which an engine such as Newton runs as a plain Python library; that starts
+faster but has no GUI, ROS 2 bridge or Isaac Sim sensors.
 
 Two points bear on a later interface. Genie Sim's has escape hatches
 (`raw_model()`, `raw_data()`) that return the native engine objects, so the
@@ -106,7 +105,7 @@ are extensions that tick once per Kit frame. As long as the loop runs Kit
 frames, adding them means enabling an extension and adding nodes or sensor
 prims, with no change to the loop; a loop that only steps physics leaves them
 frozen. Two rules keep this true. All stepping goes through `Simulation`, and
-our logic reads simulation time, never the wall clock.
+the logic reads simulation time, never the wall clock.
 
 Two changes would cause real rework, and neither is planned: running without
 Kit, where the bridge and the RTX sensors do not exist, and switching to
@@ -120,15 +119,15 @@ runs as fast as it can, so pacing to real time is ours to add, starting with a
 sleep.
 
 **Conventions follow Isaac Sim's API.** Quaternions are `wxyz`, which is what
-the current API returns; units are metres and radians, and Z is up. The
+the current API returns; units are meters and radians, and Z is up. The
 systems disagree on quaternion order, so some conversion is unavoidable: Isaac
 Sim's API, USD and MuJoCo put the real part first, and Isaac Lab 3.0, Warp,
-PhysX, Newton, ROS and SciPy put it last. Most of our calls go to Isaac Sim
+PhysX, Newton, ROS and SciPy put it last. Most calls go to Isaac Sim
 and the ROS bridge nodes convert for themselves, so matching Isaac Sim gives
-the fewest conversions in our code. Names carry the order, as in `quat_wxyz`,
+the fewest conversions in this code. Names carry the order, as in `quat_wxyz`,
 so a mix-up is visible.
 
-Our logic uses NumPy, and `Simulation` converts the Warp arrays that Isaac Sim
+The logic uses NumPy, and `Simulation` converts the Warp arrays that Isaac Sim
 returns. The projects that run one world on the CPU (OmniLRS, Pegasus, Genie
 Sim's engine interface) use NumPy; Torch and Warp pay off with many worlds on
 a GPU, the case Isaac Lab and ProtoMotions are built for.
@@ -165,7 +164,7 @@ set.
 | Question | Source |
 |---|---|
 | What replaces a call from the old core API | The "Core API to Core Experimental API" migration page; `source/standalone_examples/api/isaacsim.core.experimental.api/` in the Isaac Sim repo |
-| Whether we use anything 6.0 removed | `audit_isaac_sim_6_0.py` in the Isaac Sim repo |
+| Whether anything 6.0 removed is used | `audit_isaac_sim_6_0.py` in the Isaac Sim repo |
 | Physics setup, Newton against PhysX | `skills/physics-simulation/SKILL.md` in the Isaac Sim repo |
 | A worked `World` replacement | OmniLRS, `src/simulation.py` |
 | Backend interface design | Genie Sim, `genie_sim_engine_core`; OmniGibson, `physics_backends/base.py` |

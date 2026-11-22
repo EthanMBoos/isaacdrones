@@ -1,26 +1,22 @@
 # Running isaacdrones on Georgia Tech PACE ICE
 
-ICE is the only machine we have that runs Isaac Sim, so the code in this
-repository is verified there. Every step goes through `scripts/pace.sh`, run
-from the clone on a login node, on the campus network or VPN.
+ICE is the only machine I have that runs Isaac Sim, so I verify the code in this
+repository there. Every step goes through `scripts/pace.sh`, run from the clone
+on a login node, on the campus network or VPN.
 
 Isaac Sim runs inside an Apptainer container. ICE nodes run RHEL 9 with glibc
-2.34 and Isaac Sim 6.2's wheels require 2.35, so `uv sync --extra sim` fails
-on a node directly. The container is NVIDIA's Isaac Sim 6.2 image, which
-supplies Ubuntu 24.04 and the Vulkan libraries. We do not use the Isaac Sim
-inside the image. The script runs `uv sync --extra sim` in the container, so
-ICE gets the versions in `uv.lock`, as any Linux machine would. The cost is
-that Isaac Sim is stored twice, in the image and in the environment.
+2.34 and Isaac Sim 6.2's wheels require 2.35, so `uv sync --extra sim` fails on
+a node directly. The container is NVIDIA's Isaac Sim 6.2 image, which supplies
+Ubuntu 24.04 and the Vulkan libraries. The Isaac Sim inside the image is not
+used. The script runs `uv sync --extra sim` in the container, so ICE gets the
+versions in `uv.lock`, as any Linux machine would. The cost is that Isaac Sim is
+stored twice, in the image and in the environment.
 
-On 2026-11-16 a fresh `setup` took 16 minutes, and `uv run pytest` then
-reported 7 passed on a Blackwell and on an H100. The tests
-cover a headless boot at one PhysX step per frame, `reset()` returning
-simulation time to its start, an RTX camera producing an image, and the pose
-of a falling cube. Startup takes about 10 s with our app file,
-`src/isaacdrones/sim/isaacdrones.kit`, against one to three minutes for Isaac
-Sim's stock app. Every command in the script has run. `stream` and `--video`
-last ran on 2026-11-14, before the camera code was last changed. RTX lidar and
-radar are untried.
+A fresh `setup` takes about 16 minutes. `uv run pytest` then reports 7 passed on
+a Blackwell in about 3 minutes, and the tests also pass on an H100. Isaac Sim
+starts in under 10 s with this repository's app file, against one to three
+minutes for the stock app. `stream` and `--video` have not run since the camera
+code last changed, and RTX lidar and radar are untried.
 
 ## Commands
 
@@ -91,7 +87,7 @@ change dependencies, run `scripts/pace.sh run uv sync --extra sim`.
 does not run here. Each launch then spends about ten seconds retrying and logs
 dozens of `Hub failed to launch` warnings. The script therefore sets
 `OMNICLIENT_HUB_MODE=disabled`. Assets fetched from NVIDIA's servers are then
-not cached between runs, which costs nothing while we fetch none. Setting
+not cached between runs, which costs nothing while none are fetched. Setting
 `OMNICLIENT_HUB_MODE=shared` before calling the script keeps Hub on.
 
 **Denoising.** Apptainer's `--nv` passes the NVIDIA driver into the container
@@ -177,17 +173,17 @@ several partitions, including ones with no matching card, and the job stays at
 `PD` with reason `BadConstraints` even when a card is free. A healthy waiting
 job shows `(Priority)` or `(Resources)`.
 
-**H100s.** ICE has 19 H100 nodes and 10 RTX nodes, so an H100 job usually
-starts within seconds where an RTX job waits. NVIDIA does not support Isaac
-Sim on a GPU without RT cores, so what works on an H100 is what we have
-measured, and it may break in a later release. Physics works: the test suite
-gives the same result as on a Blackwell. Mesh rendering works in the one scene
-tried: a 640x480 image of the cube matches the Blackwell's, and 120 frames of
-the cube falling differ by 0.3 out of 255 per pixel on average, with equal
-grain. Textures, reflections and fast camera motion are untried. Gaussian
-splats do not draw, and nothing in the log says so; isaacdrones has none, but
-anything else that needs RT cores may fail as silently. Streaming does not
-work, because an H100 has no video encoder.
+**H100s.** ICE has 19 H100 nodes and 10 RTX nodes, so an H100 job usually starts
+within seconds where an RTX job waits. NVIDIA does not support Isaac Sim on a
+GPU without RT cores, so what works on an H100 is what was measured here, and it
+may break in a later release. Physics works: the test suite gives the same
+result as on a Blackwell. Mesh rendering works in the one scene tried: a 640x480
+image of the cube matches the Blackwell's, and 120 frames of the cube falling
+differ by 0.3 out of 255 per pixel on average, with equal grain. Textures,
+reflections and fast camera motion are untried. Gaussian splats do not draw, and
+nothing in the log says so; isaacdrones has none, but anything else that needs
+RT cores may fail as silently. Streaming does not work, because an H100 has no
+video encoder.
 
 **Two H100 cards crash every run.** The log shows `GPU crash is detected` and
 `ERROR_DEVICE_LOST` about ten seconds in, before any isaacdrones output. On
@@ -255,12 +251,12 @@ On a machine of your own with an RTX card none of this is needed: `uv run
 isaacdrones --stream` and the client connected to `127.0.0.1` suffice.
 
 **Limits.** The GPU's video encoder produces the stream, so `stream h100`
-refuses. A node carries one stream and one client at a time, and a second
-stream job on the same node fails to open the ports. The simulation is paced
-to real time while streaming, and video through a TCP tunnel can stutter on a
-poor connection. The stream has no password or encryption: between you and ICE
-it travels inside SSH, but on the node the ports are open to the rest of ICE,
-so another ICE user who knew the node could connect. Isaac Sim's own streaming
-app (`isaacsim isaacsim.exp.full.streaming`) failed to load its extensions
-here, which is why we start the stream from our code. An Open OnDemand desktop
-is the other route to a window, and it is untried.
+refuses. A node carries one stream and one client at a time, and a second stream
+job on the same node fails to open the ports. The simulation is paced to real
+time while streaming, and video through a TCP tunnel can stutter on a poor
+connection. The stream has no password or encryption: between you and ICE it
+travels inside SSH, but on the node the ports are open to the rest of ICE, so
+another ICE user who knew the node could connect. Isaac Sim's own streaming app
+(`isaacsim isaacsim.exp.full.streaming`) failed to load its extensions here,
+which is why the stream is started from this repository's code. An Open OnDemand
+desktop is the other route to a window, and it is untried.

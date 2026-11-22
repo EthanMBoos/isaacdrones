@@ -177,7 +177,7 @@ def test_cube_pose_falls_and_lands():
     # two warm-up steps, so it has already moved slightly.
     assert 1.9 < start[2] <= 2.0
     assert abs(start[3] - 0.9239) < 0.05
-    # After 4 s it has moved along +X and lies flat, centre half a side up.
+    # After 4 s it has moved along +X and lies flat, center half a side up.
     assert end[0] > start[0] + 0.5
     assert abs(end[2] - 0.3) < 0.02
     assert abs(sum(q * q for q in end[3:]) - 1.0) < 1e-3
