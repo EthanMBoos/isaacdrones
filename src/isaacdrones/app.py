@@ -21,7 +21,33 @@ SCENES = {
     "empty": lambda sim: None,
     "cube": lambda sim: sim.add_cube(),
     "falling-cube": lambda sim: sim.add_cube(falling=True),
+    "drone": lambda sim: _add_drone(sim),
 }
+
+
+def _add_drone(sim) -> None:
+    """A cube, and a drone that hovers until `sim.start_flight()` and then
+    flies at the cube. A camera, if there is one, rides on the drone.
+    """
+    from isaacdrones import flight
+
+    drone = flight.Drone()
+    sim.add_cube()
+    sim.add_drone(position_m=flight.START_M, mass_kg=drone.mass_kg, size_m=drone.size_m)
+    started_at = [None]
+
+    def fly() -> None:
+        elapsed = -1.0 if started_at[0] is None else sim.time - started_at[0]
+        goal, velocity = flight.target(elapsed)
+        sim.apply_drone_wrench(
+            *flight.wrench(drone, flight.State(*sim.drone_state()), goal, velocity)
+        )
+
+    def start_flight() -> None:
+        started_at[0] = sim.time
+
+    sim.before_step = fly
+    sim.start_flight = start_flight
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -48,8 +74,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--scene",
         choices=sorted(SCENES),
-        help="What is in the world besides the ground and lights. Default: empty, "
-        "or cube with --camera, or falling-cube with --video.",
+        help="What is in the world besides the ground and lights. drone adds a cube "
+        "and a drone that flies at it, carrying the camera. Default: empty, or cube "
+        "with --camera or --ros, or falling-cube with --video.",
     )
     parser.add_argument(
         "--stream",
@@ -112,13 +139,15 @@ def _run(sim, args: argparse.Namespace) -> None:
         _stream(sim)
         return
     if has_camera:
-        sim.add_camera()
+        sim.add_camera(on_drone=scene == "drone")
     if args.ros:
         sim.enable_ros()
     sim.play()
     if args.ros:
         # Wait for the renderer, so that every counted frame has an image.
         _wait_for_camera(sim)
+    if scene == "drone":
+        sim.start_flight()
     if args.video:
         _save_video(sim, args.video, args.steps or 120)
         return
@@ -139,6 +168,17 @@ def _run(sim, args: argparse.Namespace) -> None:
         f"physics_steps={sim.num_physics_steps} engine={sim.physics_engine}",
         flush=True,
     )
+    if scene == "drone":
+        position, quat, velocity, _ = sim.drone_state()
+        print(
+            "isaacdrones: drone position="
+            + " ".join(f"{c:.3f}" for c in position)
+            + " quat_wxyz="
+            + " ".join(f"{c:.3f}" for c in quat)
+            + " speed="
+            + f"{sum(c * c for c in velocity) ** 0.5:.3f}",
+            flush=True,
+        )
     if args.ros:
         clock, images = sim.ros_counts
         print(f"isaacdrones: ros clock={clock} images={images}", flush=True)
@@ -207,6 +247,8 @@ def _save_video(sim, folder: str, steps: int) -> None:
     if rgb is None:
         return
     sim.reset()
+    if hasattr(sim, "start_flight"):
+        sim.start_flight()
     # The image lags the scene by a few frames, so the first images after a
     # reset show the scene before it. Skip them.
     for _ in range(3):

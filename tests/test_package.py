@@ -123,6 +123,41 @@ def test_ros_publishes_clock_and_camera():
     assert int(match[1]) >= int(match[2]) >= steps
 
 
+@pytest.mark.sim
+def test_drone_flies_to_the_cube():
+    pytest.importorskip("isaacsim")
+    from isaacdrones import flight
+
+    # Long enough to hover, cross to the stopping point and settle there.
+    seconds = flight.HOVER_S + (flight.STOP_X_M - flight.START_M[0]) / flight.SPEED_MPS + 3.0
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "isaacdrones.app",
+            "--headless",
+            "--scene",
+            "drone",
+            "--steps",
+            str(round(seconds * 60)),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
+    match = re.search(
+        r"isaacdrones: drone position=(\S+) (\S+) (\S+) quat_wxyz=(\S+) .* speed=(\S+)",
+        result.stdout,
+    )
+    assert match, result.stdout[-3000:]
+    print(match[0])
+    x, y, z, w, speed = (float(match[i]) for i in range(1, 6))
+    assert abs(x - flight.STOP_X_M) < 0.05 and abs(y) < 0.05
+    assert abs(z - flight.START_M[2]) < 0.05
+    assert abs(w) > 0.999 and speed < 0.05
+
+
 RESET_SCRIPT = """
 from isaacdrones.sim import Simulation
 
@@ -200,3 +235,45 @@ def test_cube_pose_falls_and_lands():
     assert end[0] > start[0] + 0.5
     assert abs(end[2] - 0.3) < 0.02
     assert abs(sum(q * q for q in end[3:]) - 1.0) < 1e-3
+
+
+def test_controller_flies_a_rigid_body_to_its_target():
+    # A rigid body integrated here, without Isaac Sim, at the simulator's rate.
+    from isaacdrones.flight import GRAVITY_MPS2, Drone, State, rotation, wrench
+
+    drone, dt = Drone(), 1.0 / 60.0
+    position, velocity = [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]
+    quat, rate = [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0]  # rate is in the body frame
+    goal = (2.0, -1.0, 2.0)
+    for _ in range(600):
+        r = rotation(quat)
+        world_rate = tuple(sum(r[i][k] * rate[k] for k in range(3)) for i in range(3))
+        thrust, torque = wrench(
+            drone, State(tuple(position), tuple(quat), tuple(velocity), world_rate), goal
+        )
+        accel = [thrust / drone.mass_kg * r[i][2] for i in range(3)]
+        accel[2] -= GRAVITY_MPS2
+        inertia = drone.inertia_kgm2
+        gyro = (
+            (inertia[1] - inertia[2]) * rate[1] * rate[2],
+            (inertia[2] - inertia[0]) * rate[2] * rate[0],
+            (inertia[0] - inertia[1]) * rate[0] * rate[1],
+        )
+        for i in range(3):
+            velocity[i] += accel[i] * dt
+            position[i] += velocity[i] * dt
+            rate[i] += (torque[i] + gyro[i]) / inertia[i] * dt
+        w, x, y, z = quat
+        p, q, s = rate
+        quat = [
+            w + 0.5 * dt * (-x * p - y * q - z * s),
+            x + 0.5 * dt * (w * p + y * s - z * q),
+            y + 0.5 * dt * (w * q + z * p - x * s),
+            z + 0.5 * dt * (w * s + x * q - y * p),
+        ]
+        norm = sum(c * c for c in quat) ** 0.5
+        quat = [c / norm for c in quat]
+    assert max(abs(position[i] - goal[i]) for i in range(3)) < 0.02
+    assert max(abs(v) for v in velocity) < 0.02
+    # Level, with the nose along world x.
+    assert abs(quat[0]) > 0.999

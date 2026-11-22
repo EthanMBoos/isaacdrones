@@ -79,6 +79,10 @@ class Simulation:
         RenderingManager.set_dt(dt)
         self._ros = None
         self._camera = None
+        self._drone = None
+        # Called at the start of every step, before physics. The drone's
+        # thrust and torque are applied here.
+        self.before_step = None
 
     def add_ground_and_light(self) -> None:
         from isaacsim.core.experimental.objects import DistantLight, DomeLight, GroundPlane
@@ -121,30 +125,85 @@ class Simulation:
         positions, orientations = self._cube.get_world_poses()
         return positions.numpy()[0], orientations.numpy()[0]
 
+    def add_drone(
+        self,
+        *,
+        position_m: tuple[float, float, float],
+        mass_kg: float,
+        size_m: tuple[float, float, float],
+    ) -> None:
+        """Add the drone: a rigid box with no rotors, moved by
+        `apply_drone_wrench`. Its frame is x forward, y left, z up. PhysX
+        derives its inertia from the mass and the box.
+        """
+        import isaacsim.core.experimental.utils.stage as stage_utils
+        from isaacsim.core.experimental.objects import Cube
+        from isaacsim.core.experimental.prims import GeomPrim, RigidPrim
+
+        # The box is a scaled child, so the camera, another child, is not
+        # scaled with it.
+        stage_utils.define_prim("/World/Drone", "Xform")
+        Cube("/World/Drone/Body", sizes=1.0, scales=[list(size_m)], colors="blue")
+        GeomPrim("/World/Drone/Body", apply_collision_apis=True)
+        self._drone = RigidPrim("/World/Drone", positions=[list(position_m)], masses=[mass_kg])
+
+    def drone_state(self):
+        """The drone's true state from physics: `(position_m, quat_wxyz,
+        velocity_mps, angular_velocity_radps)`, each a tuple of floats. The
+        velocities are in the world frame.
+        """
+        positions, orientations = self._drone.get_world_poses()
+        linear, angular = self._drone.get_velocities()
+        return tuple(
+            tuple(float(c) for c in array.numpy()[0])
+            for array in (positions, orientations, linear, angular)
+        )
+
+    def apply_drone_wrench(self, thrust_n: float, torque_nm: tuple[float, float, float]) -> None:
+        """Push the drone along its own z axis and turn it, both in its body
+        frame, for the next physics step only.
+        """
+        self._drone.apply_forces_and_torques_at_pos(
+            [[0.0, 0.0, thrust_n]], [list(torque_nm)], local_frame=True
+        )
+
     def add_camera(
         self,
         *,
         position_m: tuple[float, float, float] = (0.0, -8.0, 1.0),
         quat_wxyz: tuple[float, float, float, float] = (0.7071068, 0.7071068, 0.0, 0.0),
         resolution_hw: tuple[int, int] = (480, 640),
+        on_drone: bool = False,
     ) -> None:
         """Add one RTX camera. The default sits on -Y and looks along +Y with
         world Z up in the image. A USD camera looks down its own -Z with +Y
         up, so that orientation is a quarter turn about X.
+
+        With `on_drone` the camera is fixed to the drone's nose and looks
+        along the drone's x axis, and the position and orientation are not
+        used.
         """
         import isaacsim.core.experimental.utils.stage as stage_utils
         from isaacsim.sensors.experimental.rtx import CameraSensor, RtxCamera
 
-        camera = RtxCamera(
-            "/World/Camera", translations=[list(position_m)], orientations=[list(quat_wxyz)]
-        )
+        path = "/World/Camera"
+        if on_drone:
+            path = "/World/Drone/Camera"
+            # In the drone's frame: 0.2 m ahead of center, clear of the box,
+            # looking along x with z up in the image.
+            position_m, quat_wxyz = (0.2, 0.0, 0.0), (0.5, 0.5, -0.5, -0.5)
+        camera = RtxCamera(path, translations=[list(position_m)], orientations=[list(quat_wxyz)])
+        if on_drone:
+            # A drone passes close to objects, and Isaac Sim's default near
+            # clip of 1 m would cut them out of the image.
+            camera.camera.set_clipping_ranges(0.01, 1000.0)
         self._camera = CameraSensor(camera, resolution=resolution_hw, annotators=["rgb"])
 
         from pxr import UsdGeom
 
         # Both lengths are in the same unit, so their ratio is the focal
         # length in image widths. Pixels are square.
-        prim = UsdGeom.Camera(stage_utils.get_current_stage().GetPrimAtPath("/World/Camera"))
+        prim = UsdGeom.Camera(stage_utils.get_current_stage().GetPrimAtPath(path))
         focal, aperture = prim.GetFocalLengthAttr().Get(), prim.GetHorizontalApertureAttr().Get()
         self.camera_focal_px = resolution_hw[1] * focal / aperture
 
@@ -190,6 +249,8 @@ class Simulation:
 
     def step(self) -> None:
         """Run one Kit frame, then publish it if ROS 2 is enabled."""
+        if self.before_step is not None:
+            self.before_step()
         self._app.update()
         if self._ros is None:
             return
